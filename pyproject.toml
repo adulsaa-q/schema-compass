@@ -4,19 +4,40 @@ version = "0.1.0"
 description = "The Intelligent Database Schema Topology, Join-Path Solver, and AST Safety Gateway for AI Coding Agents"
 readme = "README.md"
 requires-python = ">=3.12"
+license = { text = "MIT" }
+authors = [
+    { name = "Adul Saa (Q)", email = "adulsaa.q@gmail.com" },
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Database",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Software Development :: Compilers",
+]
 dependencies = [
     "mcp>=2.2.0",
     "networkx>=3.7",
     "pydantic>=2.13.5",
-    "pytest>=9.1.1",
     "sqlglot>=30.21.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/adulsaa-q/schema-compass"
+Repository = "https://github.com/adulsaa-q/schema-compass"
+Issues = "https://github.com/adulsaa-q/schema-compass/issues"
+Documentation = "https://github.com/adulsaa-q/schema-compass#readme"
 
 [project.scripts]
 schema-compass = "schema_compass.server:main"
 
 [dependency-groups]
 dev = [
+    "pytest>=9.1.1",
     "ruff>=0.16.10",
 ]
 

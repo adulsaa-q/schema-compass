@@ -1,0 +1,45 @@
+name: 🐛 Bug Report
+description: Create a report to help us improve schema-compass
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report an issue!
+  - type: input
+    id: version
+    attributes:
+      label: schema-compass Version
+      description: What version of schema-compass are you running?
+      placeholder: "e.g. 0.1.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: dialect
+    attributes:
+      label: Database Dialect
+      description: Which database dialect were you targeting?
+      options:
+        - SQLite
+        - PostgreSQL
+        - SQL Server (T-SQL)
+        - DuckDB
+        - Other / Generic
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction Steps
+      description: How can we reproduce this issue?
+      placeholder: |
+        1. Query or graph setup: ...
+        2. Expected behavior: ...
+        3. Actual behavior: ...
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs or Error Output
+      render: shell

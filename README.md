@@ -2,10 +2,12 @@
 
 An open-source Model Context Protocol (MCP) server that acts as a schema topology navigator and deterministic AST safety gateway between AI coding agents (Claude Code, Cursor, Windsurf, Antigravity) and relational databases (SQL Server, PostgreSQL, SQLite, DuckDB).
 
+[![CI](https://github.com/adulsaa-q/schema-compass/actions/workflows/ci.yml/badge.svg)](https://github.com/adulsaa-q/schema-compass/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/Python-3.12%2B-blue.svg)](https://www.python.org/)
 [![Model Context Protocol](https://img.shields.io/badge/MCP-Compatible-brightgreen.svg)](https://modelcontextprotocol.io/)
-[![Tests: 92 Passed](https://img.shields.io/badge/Tests-92%20Passed-brightgreen.svg)](tests/)
+[![Tests: 107 Passed](https://img.shields.io/badge/Tests-107%20Passed-brightgreen.svg)](tests/)
+[![Security: Hardened](https://img.shields.io/badge/Security-AST%20DLP%20Hardened-blueviolet.svg)](SECURITY.md)
 [![Ruff: Clean](https://img.shields.io/badge/Ruff-Compliant-brightgreen.svg)](https://astral.sh/ruff)
 
 ---

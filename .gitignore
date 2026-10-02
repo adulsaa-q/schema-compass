@@ -25,3 +25,11 @@ htmlcov/
 # OS files
 .DS_Store
 Thumbs.db
+
+# AI Agent internal workflows & local skills (Private to local workspace)
+.claude/
+.skills/
+AGENTS.md
+HANDOFF.md
+PROJECT_MAP.md
+archive/

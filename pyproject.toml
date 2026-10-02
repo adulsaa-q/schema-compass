@@ -1,0 +1,17 @@
+[project]
+name = "schema-compass"
+version = "0.1.0"
+description = "The Intelligent Database Schema Topology, Join-Path Solver, and AST Safety Gateway for AI Coding Agents"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "mcp>=2.2.0",
+    "networkx>=3.7",
+    "pydantic>=2.13.5",
+    "pytest>=9.1.1",
+    "sqlglot>=30.21.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

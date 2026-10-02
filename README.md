@@ -1,58 +1,52 @@
-# 🧭 Schema-Compass
+# schema-compass
 
-> **The Intelligent Database Topology, Join-Path Navigator & AST Safety Gateway for AI Coding Agents**
+An open-source Model Context Protocol (MCP) server that helps AI coding agents query relational databases safely and efficiently. It builds a graph topology of your tables, finds minimal multi-table join paths using Steiner Tree algorithms, and parses every query through AST traversal to prevent accidental table locks and destructive operations.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/Python-3.12%2B-blue.svg)](https://www.python.org/)
 [![Model Context Protocol](https://img.shields.io/badge/MCP-Compatible-brightgreen.svg)](https://modelcontextprotocol.io/)
-[![Zero AI Cost](https://img.shields.io/badge/AI%20Tokens-0.00%20Zero%20Cost-success.svg)](#architecture)
-
-An open-source Model Context Protocol (MCP) server that gives AI Coding Agents (Claude Code, Cursor, Windsurf, Antigravity) an intelligent compass to navigate complex enterprise databases without schema hallucination or production risks.
 
 ---
 
-## ⚡ The Core Problems It Solves
+## Why This Exists
 
-1. **Schema Overload & Context Exhaustion:**
-   Enterprise databases with 500+ tables blow up LLM context windows (50k+ tokens), causing high latency and "Lost in the Middle" errors.
-   * `schema-compass` returns **Minimal Effective Context (MEC)**: compact, token-efficient contracts (< 200 tokens per table) with data types, null rates, and sample values.
+1. **Schema Overload:**
+   Enterprise databases with 500+ tables blow up LLM context windows (50k+ tokens), causing high latency and hallucinations. `schema-compass` outputs Minimal Effective Context (MEC) contracts under 200 tokens per table, with column types, null rates, and sample values.
 
-2. **Multi-Hop Join Ambiguity:**
-   In schemas with implicit foreign keys or missing constraints, agents hallucinate joins, creating Cartesian products or circular loops.
-   * `schema-compass` models the database as a weighted topology graph and computes the **Minimum Steiner Tree (KMB 2-Approximation Algorithm)** to give agents the mathematically optimal `JOIN ... ON` path across $k$ tables in milliseconds.
+2. **Hallucinated Joins:**
+   When foreign keys are missing or implicit, AI agents guess join conditions, producing Cartesian products or circular references. We model database relationships as an edge-weighted graph and calculate the Minimum Steiner Tree (KMB 2-approximation) to output exact `JOIN ... ON` clauses across any set of tables.
 
-3. **Production Safety & Locking:**
-   Unchecked agents can run slow unindexed queries, lock operational tables, or execute destructive DML.
-   * `schema-compass` uses **`sqlglot` AST Traversal** to strictly enforce read-only execution, inject `TOP 100` / `LIMIT 100`, enforce statement timeouts, and automatically inject `WITH (NOLOCK)` on SQL Server.
+3. **Production Safety:**
+   Unchecked agents can run slow unindexed queries, lock operational tables, or run unintended modifications. We inspect the `sqlglot` Abstract Syntax Tree to block non-SELECT statements, inject `TOP 100` or `LIMIT 100`, and automatically inject `WITH (NOLOCK)` for SQL Server.
 
 ---
 
-## 🛠️ Core MCP Tools
+## MCP Tools
 
-- `search_catalog(query, top_k)`: Local heuristic & BM25 catalog search over tables, views, and columns.
-- `get_join_tree(tables)`: Computes the minimal Steiner join tree connecting all requested tables and returns clean SQL `FROM ... JOIN ... ON`.
-- `get_table_contract(table_name, mode)`: Returns a compact schema summary with data types, null rates, and sample values.
-- `explain_metric(metric_name)`: Returns business definition, calculation formula, and upstream lineage.
-- `execute_safe_query(sql, max_rows)`: Validates via AST, injects safety clamps, and executes via read-only connection.
+- `search_catalog(query, top_k)`: Search tables, views, and columns using keyword heuristics.
+- `get_join_tree(tables)`: Find the minimal join path connecting the requested tables and output the SQL `FROM ... JOIN ... ON` clause.
+- `get_table_contract(table_name, mode)`: Return compact schema contracts with types, keys, and data samples.
+- `explain_metric(metric_name)`: Return metric formulas, business logic, and upstream column lineage.
+- `execute_safe_query(sql, max_rows)`: Validate through AST, clamp row limits, and execute over a read-only database connection.
 
 ---
 
-## 🚀 Quickstart
+## Quickstart
 
 ```bash
 # Clone repository
 git clone https://github.com/adulsaa-q/schema-compass.git
 cd schema-compass
 
-# Setup environment with uv
+# Install dependencies with uv
 uv sync
 
-# Run test suite
+# Run tests
 uv run pytest
 ```
 
 ---
 
-## 📄 License
+## License
 
-MIT © Adul Sa-a (Q)
+MIT (c) Adul Sa-a (Q)

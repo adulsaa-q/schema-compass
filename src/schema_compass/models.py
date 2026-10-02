@@ -76,5 +76,13 @@ class JoinTree(BaseModel):
         return "\n".join(lines)
 
 
-class DisconnectedGraphError(Exception):
+class SchemaCompassError(Exception):
+    """Base exception for all schema-compass domain, graph, and safety errors."""
+
+
+class DisconnectedGraphError(SchemaCompassError):
     """Raised when two or more requested tables cannot be connected."""
+
+
+class DialectAdapterError(SchemaCompassError):
+    """Raised when database dialect metadata extraction fails."""

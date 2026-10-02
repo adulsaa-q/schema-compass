@@ -1,3 +1,5 @@
+import logging
+
 from mcp.server.mcpserver import MCPServer
 from sqlglot.errors import ParseError
 
@@ -8,6 +10,8 @@ from schema_compass.profiler.contract import format_contract
 from schema_compass.profiler.erd import generate_mermaid_erd
 from schema_compass.safety.ast_guard import ASTGuard, ASTSecurityViolation
 from schema_compass.safety.audit import AuditLogger
+
+logger = logging.getLogger(__name__)
 
 
 def create_server(contracts: list[TableContract] | None = None) -> MCPServer:
@@ -145,16 +149,19 @@ def create_server(contracts: list[TableContract] | None = None) -> MCPServer:
         description="Validates SQL via AST traversal, enforces read-only execution, DLP checks, and clamps row limits (TOP/LIMIT)",
     )
     def execute_safe_query(sql: str, dialect: str = "tsql", max_rows: int = 100) -> str:
+        logger.info("execute_safe_query called with dialect=%s, max_rows=%d", dialect, max_rows)
         try:
             rewritten_sql = guard.rewrite(sql, dialect=dialect, max_rows=max_rows)
             audit_logger.log_query(sql=sql, dialect=dialect, allowed=True, max_rows=max_rows)
             return f"Validated Safe SQL ({dialect}):\n{rewritten_sql}"
         except ASTSecurityViolation as e:
+            logger.warning("execute_safe_query blocked by AST security policy: %s", e)
             audit_logger.log_query(
                 sql=sql, dialect=dialect, allowed=False, reason=str(e), max_rows=max_rows
             )
             return f"Security violation: {e}"
         except (ParseError, ValueError, TypeError) as e:
+            logger.warning("execute_safe_query validation failure: %s", e)
             audit_logger.log_query(
                 sql=sql, dialect=dialect, allowed=False, reason=str(e), max_rows=max_rows
             )
@@ -170,6 +177,7 @@ def load_contracts_from_source(source_type: str, path: str | None = None) -> lis
 
     from schema_compass.dialects.sqlite import SQLiteAdapter
 
+    logger.info("Loading contracts from source_type=%s, path=%s", source_type, path)
     stype = source_type.lower()
     if stype == "json" and path:
         p = Path(path)

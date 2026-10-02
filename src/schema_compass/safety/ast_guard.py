@@ -1,11 +1,15 @@
-from collections.abc import Sequence
+import logging
 
 import sqlglot
 from sqlglot import exp
 from sqlglot.errors import ParseError
 
+from schema_compass.models import SchemaCompassError
 
-class ASTSecurityViolation(Exception):
+logger = logging.getLogger(__name__)
+
+
+class ASTSecurityViolation(SchemaCompassError):
     """Raised when a query attempts prohibited DDL/DML, multi-statement injection, or dangerous operations."""
 
 
@@ -88,15 +92,20 @@ class ASTGuard:
         blocked_tables: set[str] | None = None,
         max_joins: int | None = 10,
         max_subquery_depth: int | None = 4,
-    ) -> exp.Expression:
+    ) -> exp.Query:
         # sqlglot can parse multiple statements; reject if empty or multi-statement
+        logger.debug(
+            "Validating query with dialect=%s, allow_cartesian=%s", dialect, allow_cartesian
+        )
         try:
-            statements: Sequence[exp.Expression | None] = sqlglot.parse(sql, read=dialect)
+            statements = sqlglot.parse(sql, read=dialect)
         except ParseError as e:
+            logger.warning("SQL parse error for query: %s", e)
             raise ASTSecurityViolation(f"SQL parse error: {e}") from e
 
         valid_stmts = [s for s in statements if s is not None]
         if len(valid_stmts) != 1:
+            logger.warning("Multi-statement attempt detected: count=%d", len(valid_stmts))
             raise ASTSecurityViolation(
                 f"Expected exactly 1 statement, found {len(valid_stmts)}. Multi-statement execution blocked."
             )
@@ -105,6 +114,7 @@ class ASTGuard:
 
         # root expression must be a read query (Select, Union, etc.)
         if not isinstance(stmt, exp.Query):
+            logger.warning("Prohibited statement type attempted: %s", type(stmt).__name__)
             raise ASTSecurityViolation(
                 f"Prohibited statement type: {stmt.key.upper() if hasattr(stmt, 'key') else type(stmt).__name__}. Only SELECT queries are permitted."
             )
@@ -273,7 +283,8 @@ class ASTGuard:
         max_rows = max(1, max_rows)
 
         # clone AST to avoid modifying input
-        ast = stmt.copy()
+        cloned = stmt.copy()
+        ast: exp.Query = cloned if isinstance(cloned, exp.Query) else stmt
 
         # clamp or inject row limit on the root query
         limit_node = ast.args.get("limit")

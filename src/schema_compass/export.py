@@ -1,6 +1,7 @@
 import argparse
 import json
 import sqlite3
+import sys
 from pathlib import Path
 
 from schema_compass.dialects.sqlite import SQLiteAdapter
@@ -40,7 +41,7 @@ def main() -> None:
     args = parser.parse_args()
 
     contracts = export_schema_to_json(args.db, args.path, args.output)
-    print(f"Exported {len(contracts)} tables to {args.output}")
+    sys.stderr.write(f"Exported {len(contracts)} tables to {args.output}\n")
 
 
 if __name__ == "__main__":

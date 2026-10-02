@@ -1,10 +1,13 @@
 """Schema topology graph builder using NetworkX."""
 
-from typing import Any
+import logging
+from typing import Any, cast
 
 import networkx as nx
 
 from schema_compass.models import DisconnectedGraphError, Relationship, TableContract
+
+logger = logging.getLogger(__name__)
 
 
 class SchemaGraph:
@@ -27,7 +30,7 @@ class SchemaGraph:
 
     def has_node(self, table_name: str) -> bool:
         canonical = self.resolve_table_name(table_name)
-        return self.graph.has_node(canonical)
+        return bool(self.graph.has_node(canonical))
 
     def add_table(self, contract: TableContract) -> None:
         self._table_contracts[contract.name] = contract
@@ -73,14 +76,14 @@ class SchemaGraph:
     def has_edge(self, u: str, v: str) -> bool:
         u_canon = self.resolve_table_name(u)
         v_canon = self.resolve_table_name(v)
-        return self.graph.has_edge(u_canon, v_canon)
+        return bool(self.graph.has_edge(u_canon, v_canon))
 
     def get_edge_metadata(self, u: str, v: str) -> dict[str, Any]:
         u_canon = self.resolve_table_name(u)
         v_canon = self.resolve_table_name(v)
         if not self.graph.has_edge(u_canon, v_canon):
             raise KeyError(f"no edge between {u} and {v}")
-        return self.graph[u_canon][v_canon]
+        return cast(dict[str, Any], dict(self.graph[u_canon][v_canon]))
 
     def get_contract(self, table_name: str) -> TableContract | None:
         canonical = self.resolve_table_name(table_name)
@@ -95,6 +98,9 @@ class SchemaGraph:
             raise DisconnectedGraphError(f"table '{target}' not in schema graph")
 
         try:
-            return nx.shortest_path(self.graph, source=src_canon, target=tgt_canon, weight="weight")
+            return cast(
+                list[str],
+                nx.shortest_path(self.graph, source=src_canon, target=tgt_canon, weight="weight"),
+            )
         except (nx.NetworkXNoPath, nx.NodeNotFound) as err:
             raise DisconnectedGraphError(f"no join path between '{source}' and '{target}'") from err

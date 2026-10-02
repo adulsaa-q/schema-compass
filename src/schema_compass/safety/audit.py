@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import threading
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -13,6 +14,7 @@ class AuditLogger:
     def __init__(self, log_path: Path | str = Path(".remember/audit_log.jsonl")) -> None:
         self.log_path = Path(log_path)
         self.log_path.parent.mkdir(parents=True, exist_ok=True)
+        self._lock = threading.Lock()
 
     def log_query(
         self,
@@ -36,7 +38,7 @@ class AuditLogger:
             "sql_snippet": sql.strip()[:200],
         }
 
-        with open(self.log_path, "a", encoding="utf-8") as f:
+        with self._lock, open(self.log_path, "a", encoding="utf-8") as f:
             f.write(json.dumps(record) + "\n")
 
         return record

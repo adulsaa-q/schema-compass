@@ -37,6 +37,7 @@ schema-compass = "schema_compass.server:main"
 
 [dependency-groups]
 dev = [
+    "mypy>=1.15.0",
     "pytest>=9.1.1",
     "ruff>=0.16.10",
 ]
@@ -58,3 +59,13 @@ exclude = [
     ".skills",
     ".claude",
 ]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_return_any = true
+warn_unused_configs = true
+
+[[tool.mypy.overrides]]
+module = ["networkx", "networkx.*"]
+ignore_missing_imports = true

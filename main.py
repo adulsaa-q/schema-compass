@@ -1,6 +1,4 @@
-def main():
-    print("Hello from enterprise-bi-mcp!")
-
+from schema_compass.server import main
 
 if __name__ == "__main__":
     main()

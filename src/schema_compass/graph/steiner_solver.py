@@ -17,7 +17,11 @@ class SteinerJoinSolver:
         if not terminals:
             raise ValueError("terminals list cannot be empty")
 
-        unique_terminals = list(dict.fromkeys(terminals))
+        resolved_terminals = [self.schema_graph.resolve_table_name(t) for t in terminals]
+        unique_terminals = list(dict.fromkeys(resolved_terminals))
+
+        if root_table:
+            root_table = self.schema_graph.resolve_table_name(root_table)
 
         for t in unique_terminals:
             if not self.schema_graph.graph.has_node(t):

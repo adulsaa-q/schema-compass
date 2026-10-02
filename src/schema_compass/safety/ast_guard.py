@@ -41,14 +41,26 @@ PROHIBITED_FUNCTIONS = {
     "opendatasource",
     "openrowset",
     "openquery",
-    # PostgreSQL administrative and file/network access functions
+    "sp_executesql",
+    # PostgreSQL administrative, file/network access, and session alteration
     "pg_read_file",
     "pg_write_file",
     "pg_read_binary_file",
+    "pg_sleep",
+    "pg_terminate_backend",
+    "pg_cancel_backend",
     "dblink",
     "dblink_exec",
-    # SQLite dynamic extension loading
+    "set_config",
+    "current_setting",
+    # MySQL / generic side-channel and DoS
+    "sleep",
+    "benchmark",
+    "sys_exec",
+    "sys_eval",
+    # SQLite dynamic extension loading and memory exhaustion
     "load_extension",
+    "randomblob",
 }
 
 
@@ -56,6 +68,11 @@ import re
 
 PII_COLUMN_PATTERNS = re.compile(
     r"(ssn|citizen|national_id|salary|wage|bonus|credit_card|card_num|cvv|password|passwd|secret|token|bank_acc|iban|passport)",
+    re.IGNORECASE,
+)
+
+SENSITIVE_TABLE_PATTERNS = re.compile(
+    r"(employee|user|payroll|salary|credential|auth|account)",
     re.IGNORECASE,
 )
 
@@ -68,6 +85,7 @@ class ASTGuard:
         allow_cartesian: bool = False,
         block_unaggregated_pii: bool = True,
         blocked_columns: set[str] | None = None,
+        blocked_tables: set[str] | None = None,
         max_joins: int | None = 10,
         max_subquery_depth: int | None = 4,
     ) -> exp.Expression:
@@ -148,14 +166,53 @@ class ASTGuard:
                         f"Query complexity exceeded: Subquery nesting depth {depth} exceeds maximum {max_subquery_depth}."
                     )
 
+        # Wildcard DLP Protection on sensitive tables
+        # Wildcard DLP Protection on sensitive tables
+        if blocked_tables:
+            for select_expr in stmt.find_all(exp.Select):
+                has_star = bool(list(select_expr.find_all(exp.Star)))
+                if has_star:
+                    direct_tables: set[str] = set()
+                    from_node = select_expr.args.get("from") or select_expr.args.get("from_")
+                    if from_node and from_node.this:
+                        if hasattr(from_node.this, "name") and from_node.this.name:
+                            direct_tables.add(from_node.this.name.lower())
+                        if (
+                            hasattr(from_node.this, "alias_or_name")
+                            and from_node.this.alias_or_name
+                        ):
+                            direct_tables.add(from_node.this.alias_or_name.lower())
+                    for join in select_expr.args.get("joins") or []:
+                        if join.this:
+                            if hasattr(join.this, "name") and join.this.name:
+                                direct_tables.add(join.this.name.lower())
+                            if hasattr(join.this, "alias_or_name") and join.this.alias_or_name:
+                                direct_tables.add(join.this.alias_or_name.lower())
+
+                    for tbl in direct_tables:
+                        if tbl in {t.lower() for t in blocked_tables}:
+                            raise ASTSecurityViolation(
+                                f"DLP Policy Violation: Wildcard SELECT (*) on sensitive table '{tbl}' is blocked under DLP policy. Explicit column projection is required."
+                            )
+
         if not allow_cartesian:
             for select_expr in stmt.find_all(exp.Select):
                 where_node = select_expr.args.get("where")
-                where_tables: set[str] = set()
+                where_cross_pairs: set[frozenset[str]] = set()
                 if where_node is not None:
-                    for col in where_node.find_all(exp.Column):
-                        if col.table:
-                            where_tables.add(col.table.lower())
+                    for eq in where_node.find_all(exp.EQ):
+                        left = eq.this
+                        right = eq.expression
+                        if (
+                            isinstance(left, exp.Column)
+                            and isinstance(right, exp.Column)
+                            and left.table
+                            and right.table
+                        ):
+                            t1 = left.table.lower()
+                            t2 = right.table.lower()
+                            if t1 != t2:
+                                where_cross_pairs.add(frozenset([t1, t2]))
 
                 # Inspect only direct joins of this Select node to avoid subquery scope leaks
                 joins = select_expr.args.get("joins") or []
@@ -172,16 +229,17 @@ class ASTGuard:
                             f"Unconstrained Cartesian join detected: {join.sql()}. CROSS JOIN without condition blocked."
                         )
 
-                    # Implicit comma join or unconstrained join must have participating table in WHERE
+                    # Implicit comma join or unconstrained join must have equijoin connecting to another table
                     if not has_on_or_using:
                         table_name = (
                             join.this.alias_or_name.lower()
                             if hasattr(join.this, "alias_or_name")
                             else ""
                         )
-                        if not table_name or table_name not in where_tables:
+                        is_linked = any(table_name in pair for pair in where_cross_pairs)
+                        if not table_name or not is_linked:
                             raise ASTSecurityViolation(
-                                f"Unconstrained Cartesian join detected: {join.sql()}. Queries must specify ON, USING, or WHERE conditions."
+                                f"Unconstrained Cartesian join detected: {join.sql()}. Comma join requires cross-table equijoin predicate in WHERE."
                             )
 
         return stmt
@@ -195,6 +253,7 @@ class ASTGuard:
         allow_cartesian: bool = False,
         block_unaggregated_pii: bool = True,
         blocked_columns: set[str] | None = None,
+        blocked_tables: set[str] | None = None,
         max_joins: int | None = 10,
         max_subquery_depth: int | None = 4,
     ) -> str:
@@ -205,6 +264,7 @@ class ASTGuard:
             allow_cartesian=allow_cartesian,
             block_unaggregated_pii=block_unaggregated_pii,
             blocked_columns=blocked_columns,
+            blocked_tables=blocked_tables,
             max_joins=max_joins,
             max_subquery_depth=max_subquery_depth,
         )

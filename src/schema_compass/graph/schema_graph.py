@@ -13,13 +13,25 @@ class SchemaGraph:
     def __init__(self) -> None:
         self.graph = nx.Graph()
         self._table_contracts: dict[str, TableContract] = {}
+        self._ci_map: dict[str, str] = {}
 
     @property
     def tables(self) -> list[str]:
         return list(self.graph.nodes)
 
+    def resolve_table_name(self, name: str) -> str:
+        """Resolve a table name case-insensitively to its canonical graph node name."""
+        if self.graph.has_node(name):
+            return name
+        return self._ci_map.get(name.lower(), name)
+
+    def has_node(self, table_name: str) -> bool:
+        canonical = self.resolve_table_name(table_name)
+        return self.graph.has_node(canonical)
+
     def add_table(self, contract: TableContract) -> None:
         self._table_contracts[contract.name] = contract
+        self._ci_map[contract.name.lower()] = contract.name
         self.graph.add_node(contract.name, contract=contract)
 
         for rel in contract.relationships:
@@ -32,25 +44,25 @@ class SchemaGraph:
     load_contracts = load_tables
 
     def add_relationship(self, rel: Relationship) -> None:
-        if not self.graph.has_node(rel.source_table):
-            self.graph.add_node(rel.source_table)
-        if not self.graph.has_node(rel.target_table):
-            self.graph.add_node(rel.target_table)
+        src = self.resolve_table_name(rel.source_table)
+        tgt = self.resolve_table_name(rel.target_table)
+        if not self.graph.has_node(src):
+            self.graph.add_node(src)
+        if not self.graph.has_node(tgt):
+            self.graph.add_node(tgt)
 
         # Retain minimal-weight relationship if edge already exists
-        if self.graph.has_edge(rel.source_table, rel.target_table):
-            existing_weight = self.graph[rel.source_table][rel.target_table].get(
-                "weight", float("inf")
-            )
+        if self.graph.has_edge(src, tgt):
+            existing_weight = self.graph[src][tgt].get("weight", float("inf"))
             if rel.weight >= existing_weight:
                 return
 
         self.graph.add_edge(
-            rel.source_table,
-            rel.target_table,
+            src,
+            tgt,
             weight=rel.weight,
-            source_table=rel.source_table,
-            target_table=rel.target_table,
+            source_table=src,
+            target_table=tgt,
             source_col=rel.source_column,
             target_col=rel.target_column,
             from_col=rel.source_column,
@@ -59,23 +71,30 @@ class SchemaGraph:
         )
 
     def has_edge(self, u: str, v: str) -> bool:
-        return self.graph.has_edge(u, v)
+        u_canon = self.resolve_table_name(u)
+        v_canon = self.resolve_table_name(v)
+        return self.graph.has_edge(u_canon, v_canon)
 
     def get_edge_metadata(self, u: str, v: str) -> dict[str, Any]:
-        if not self.graph.has_edge(u, v):
+        u_canon = self.resolve_table_name(u)
+        v_canon = self.resolve_table_name(v)
+        if not self.graph.has_edge(u_canon, v_canon):
             raise KeyError(f"no edge between {u} and {v}")
-        return self.graph[u][v]
+        return self.graph[u_canon][v_canon]
 
     def get_contract(self, table_name: str) -> TableContract | None:
-        return self._table_contracts.get(table_name)
+        canonical = self.resolve_table_name(table_name)
+        return self._table_contracts.get(canonical)
 
     def get_shortest_path(self, source: str, target: str) -> list[str]:
-        if not self.graph.has_node(source):
+        src_canon = self.resolve_table_name(source)
+        tgt_canon = self.resolve_table_name(target)
+        if not self.graph.has_node(src_canon):
             raise DisconnectedGraphError(f"table '{source}' not in schema graph")
-        if not self.graph.has_node(target):
+        if not self.graph.has_node(tgt_canon):
             raise DisconnectedGraphError(f"table '{target}' not in schema graph")
 
         try:
-            return nx.shortest_path(self.graph, source=source, target=target, weight="weight")
+            return nx.shortest_path(self.graph, source=src_canon, target=tgt_canon, weight="weight")
         except (nx.NetworkXNoPath, nx.NodeNotFound) as err:
             raise DisconnectedGraphError(f"no join path between '{source}' and '{target}'") from err

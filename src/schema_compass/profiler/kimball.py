@@ -2,11 +2,38 @@ from typing import Literal
 
 from schema_compass.models import ColumnInfo
 
-FACT_PREFIXES = ("fact_", "fct_", "f_")
-DIM_PREFIXES = ("dim_", "d_")
-BRIDGE_PREFIXES = ("bridge_", "map_", "xref_", "br_")
+FACT_PREFIXES = ("fact_", "fct_", "f_", "fact")
+DIM_PREFIXES = ("dim_", "d_", "dim")
+BRIDGE_PREFIXES = ("bridge_", "map_", "xref_", "br_", "bridge")
+
+
+FACT_NAMES = {
+    "orders",
+    "order_items",
+    "sales",
+    "invoices",
+    "transactions",
+    "events",
+    "logs",
+    "snapshots",
+    "shipments",
+    "payments",
+}
+DIM_NAMES = {
+    "customers",
+    "users",
+    "products",
+    "categories",
+    "regions",
+    "stores",
+    "dates",
+    "calendar",
+    "suppliers",
+    "employees",
+}
 
 SCD_COLUMNS = {"is_current", "valid_from", "valid_to", "start_date", "end_date", "row_is_current"}
+
 
 MEASURE_TYPE_KEYWORDS = ("decimal", "numeric", "money", "float", "double", "real")
 MEASURE_NAME_KEYWORDS = (
@@ -32,10 +59,10 @@ def classify_table_role(
 ) -> Literal["fact", "dimension", "bridge", "unknown"]:
     clean_name = table_name.lower().split(".")[-1]
 
-    # naming prefix is primary signal when explicitly declared
-    if clean_name.startswith(FACT_PREFIXES):
+    # naming prefix or canonical domain name is primary signal
+    if clean_name.startswith(FACT_PREFIXES) or clean_name in FACT_NAMES:
         return "fact"
-    if clean_name.startswith(DIM_PREFIXES):
+    if clean_name.startswith(DIM_PREFIXES) or clean_name in DIM_NAMES:
         return "dimension"
     if clean_name.startswith(BRIDGE_PREFIXES):
         return "bridge"

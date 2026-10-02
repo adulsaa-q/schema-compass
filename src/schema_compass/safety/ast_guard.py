@@ -81,6 +81,9 @@ SENSITIVE_TABLE_PATTERNS = re.compile(
 )
 
 
+MAX_SQL_LENGTH = 100_000  # 100 KB payload limit to prevent parser memory bombs
+
+
 class ASTGuard:
     def validate(
         self,
@@ -93,6 +96,13 @@ class ASTGuard:
         max_joins: int | None = 10,
         max_subquery_depth: int | None = 4,
     ) -> exp.Query:
+        # Fail fast: reject oversized payloads before AST parsing
+        if len(sql) > MAX_SQL_LENGTH:
+            logger.warning("SQL payload exceeded maximum length: length=%d", len(sql))
+            raise ASTSecurityViolation(
+                f"SQL payload too large ({len(sql):,} chars). Maximum allowed is {MAX_SQL_LENGTH:,}."
+            )
+
         # sqlglot can parse multiple statements; reject if empty or multi-statement
         logger.debug(
             "Validating query with dialect=%s, allow_cartesian=%s", dialect, allow_cartesian

@@ -74,3 +74,41 @@ async def test_execute_safe_query_tool_rejects_dangerous(server) -> None:
     )
     text = res.content[0].text
     assert "Security violation" in text or "error" in text.lower()
+
+
+def test_load_contracts_from_json(tmp_path) -> None:
+    import json
+
+    from schema_compass.server import load_contracts_from_source
+
+    test_contracts_data = [
+        {
+            "name": "dim_store",
+            "schema_name": "dbo",
+            "row_count": 100,
+            "role": "dimension",
+            "columns": [{"name": "store_id", "data_type": "INT", "is_pk": True}],
+            "relationships": [],
+        }
+    ]
+    json_file = tmp_path / "schema.json"
+    json_file.write_text(json.dumps(test_contracts_data), encoding="utf-8")
+
+    contracts = load_contracts_from_source("json", str(json_file))
+    assert len(contracts) == 1
+    assert contracts[0].name == "dim_store"
+
+
+def test_load_contracts_from_sqlite(tmp_path) -> None:
+    import sqlite3
+
+    from schema_compass.server import load_contracts_from_source
+
+    db_path = tmp_path / "test.db"
+    conn = sqlite3.connect(str(db_path))
+    conn.execute("CREATE TABLE products (product_id INT PRIMARY KEY, name TEXT)")
+    conn.close()
+
+    contracts = load_contracts_from_source("sqlite", str(db_path))
+    assert len(contracts) == 1
+    assert contracts[0].name == "products"

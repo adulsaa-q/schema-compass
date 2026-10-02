@@ -251,3 +251,23 @@ def test_postgres_adapter_builds_contracts_from_metadata() -> None:
 
     users = next(c for c in contracts if c.name == "users")
     assert users.role == "dimension"
+
+
+def test_export_schema_to_json(tmp_path) -> None:
+    import json
+    import sqlite3
+
+    from schema_compass.export import export_schema_to_json
+
+    db_path = tmp_path / "sample.db"
+    conn = sqlite3.connect(str(db_path))
+    conn.execute("CREATE TABLE products (product_id INT PRIMARY KEY, title TEXT)")
+    conn.close()
+
+    out_file = tmp_path / "exported.json"
+    export_schema_to_json(source_type="sqlite", path=str(db_path), output_path=str(out_file))
+
+    assert out_file.exists()
+    data = json.loads(out_file.read_text(encoding="utf-8"))
+    assert len(data) == 1
+    assert data[0]["name"] == "products"

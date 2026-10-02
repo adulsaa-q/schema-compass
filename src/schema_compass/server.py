@@ -126,9 +126,59 @@ def create_server(contracts: list[TableContract] | None = None) -> MCPServer:
     return server
 
 
+def load_contracts_from_source(source_type: str, path: str | None = None) -> list[TableContract]:
+    import json
+    import sqlite3
+    from pathlib import Path
+
+    from schema_compass.dialects.sqlite import SQLiteAdapter
+
+    stype = source_type.lower()
+    if stype == "json" and path:
+        p = Path(path)
+        if not p.exists():
+            raise FileNotFoundError(f"Schema JSON file not found: {path}")
+        with open(p, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return [TableContract.model_validate(item) for item in data]
+
+    if stype == "sqlite" and path:
+        p = Path(path)
+        if not p.exists():
+            raise FileNotFoundError(f"SQLite database file not found: {path}")
+        conn = sqlite3.connect(str(p))
+        try:
+            adapter = SQLiteAdapter(conn)
+            return adapter.extract_contracts()
+        finally:
+            conn.close()
+
+    # default fallback to sample schema fixture
+    from tests.fixtures.sample_schema import SAMPLE_CONTRACTS
+
+    return SAMPLE_CONTRACTS
+
+
 def main() -> None:
-    # default entrypoint running over stdio for MCP clients
-    server = create_server()
+    import argparse
+    import os
+
+    parser = argparse.ArgumentParser(description="Schema-Compass MCP Server")
+    parser.add_argument(
+        "--source",
+        choices=["sample", "sqlite", "json"],
+        default=os.getenv("SCHEMA_COMPASS_SOURCE", "sample"),
+        help="Schema source type: sample, sqlite, or json",
+    )
+    parser.add_argument(
+        "--path",
+        default=os.getenv("SCHEMA_COMPASS_PATH"),
+        help="Path to sqlite .db file or pre-exported schema .json file",
+    )
+    args = parser.parse_args()
+
+    contracts = load_contracts_from_source(args.source, args.path)
+    server = create_server(contracts=contracts)
     server.run(transport="stdio")
 
 

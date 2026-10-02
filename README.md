@@ -27,7 +27,7 @@ An open-source Model Context Protocol (MCP) server that helps AI coding agents q
 - `get_join_tree(tables)`: Find the minimal join path connecting the requested tables and output the SQL `FROM ... JOIN ... ON` clause.
 - `get_table_contract(table_name, mode)`: Return compact schema contracts with types, keys, and data samples.
 - `explain_metric(metric_name)`: Return metric formulas, business logic, and upstream column lineage.
-- `execute_safe_query(sql, max_rows)`: Validate through AST, clamp row limits, and execute over a read-only database connection.
+- `execute_safe_query(sql, dialect, max_rows)`: Validate through AST, clamp row limits, and inject table hints.
 
 ---
 
@@ -41,8 +41,90 @@ cd schema-compass
 # Install dependencies with uv
 uv sync
 
-# Run tests
+# Run tests (37 tests across graph, solver, safety AST, profiler, and dialects)
 uv run pytest
+```
+
+---
+
+## Usage Modes
+
+### 1. Offline Schema Mode (Zero-Risk for Enterprise)
+
+You do not need a live database connection to use Schema-Compass. You can export table metadata (column names, keys, data types) to a JSON file once. No customer data or PII is ever exported.
+
+```bash
+# Export schema metadata from an SQLite database
+uv run python -m schema_compass.export --db sqlite --path chinook.db --output chinook_schema.json
+
+# Run MCP server using the offline JSON schema
+uv run schema-compass --source json --path chinook_schema.json
+```
+
+### 2. Local SQLite Mode
+
+Point Schema-Compass directly to an SQLite database file:
+
+```bash
+uv run schema-compass --source sqlite --path chinook.db
+```
+
+---
+
+## MCP Client Configuration
+
+### Claude Desktop (`claude_desktop_config.json`)
+
+```json
+{
+  "mcpServers": {
+    "schema-compass": {
+      "command": "uv",
+      "args": [
+        "--directory",
+        "/absolute/path/to/schema-compass",
+        "run",
+        "schema-compass",
+        "--source",
+        "json",
+        "--path",
+        "/absolute/path/to/schema_metadata.json"
+      ]
+    }
+  }
+}
+```
+
+### Cursor (`.cursor/mcp.json`)
+
+```json
+{
+  "mcpServers": {
+    "schema-compass": {
+      "command": "uv",
+      "args": [
+        "--directory",
+        "D:\\dev\\PSN-Q\\schema-compass",
+        "run",
+        "schema-compass"
+      ]
+    }
+  }
+}
+```
+
+---
+
+## Empirical Benchmarks
+
+Run the built-in benchmarks:
+
+```bash
+# Multi-branch enterprise join benchmark (91.8% token savings)
+uv run python evals/eval_join_benchmark.py
+
+# Real-world 11-table Chinook database benchmark (5-hop join in 3.4ms)
+uv run python evals/eval_chinook_showcase.py
 ```
 
 ---

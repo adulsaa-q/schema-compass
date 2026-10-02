@@ -8,28 +8,21 @@ from schema_compass.models import DisconnectedGraphError, JoinStep, JoinTree
 
 
 class SteinerJoinSolver:
-    """Computes minimal-cost join trees connecting k arbitrary database tables."""
+    """Builds minimal-cost join trees across arbitrary tables."""
 
     def __init__(self, schema_graph: SchemaGraph) -> None:
         self.schema_graph = schema_graph
 
     def solve(self, terminals: list[str], root_table: str | None = None) -> JoinTree:
-        """
-        Compute the minimal join tree connecting all requested terminal tables.
-        Raises DisconnectedGraphError if any terminal is missing or unreachable.
-        """
         if not terminals:
-            raise ValueError("Terminals list cannot be empty.")
+            raise ValueError("terminals list cannot be empty")
 
-        # Deduplicate while preserving order
         unique_terminals = list(dict.fromkeys(terminals))
 
-        # Validation: all terminals must exist
         for t in unique_terminals:
             if not self.schema_graph.graph.has_node(t):
-                raise DisconnectedGraphError(f"Table '{t}' not found in schema graph.")
+                raise DisconnectedGraphError(f"table '{t}' not in schema graph")
 
-        # Single table query requires no joins
         if len(unique_terminals) == 1:
             return JoinTree(
                 root_table=unique_terminals[0],
@@ -38,44 +31,38 @@ class SteinerJoinSolver:
                 total_weight=0.0,
             )
 
-        # Check connectivity: all terminals must be in the same connected component
+        # networkx steiner_tree throws KeyError on disjoint graphs
+        # verify all terminals share a connected component first
         first = unique_terminals[0]
         connected_comp = nx.node_connected_component(self.schema_graph.graph, first)
         for t in unique_terminals[1:]:
             if t not in connected_comp:
-                raise DisconnectedGraphError(
-                    f"Table '{t}' is isolated and cannot be joined to '{first}'."
-                )
+                raise DisconnectedGraphError(f"table '{t}' has no relational path to '{first}'")
 
-        # Compute Steiner Minimal Tree using KMB 2-approximation algorithm on the connected subgraph
         try:
-            component_graph = self.schema_graph.graph.subgraph(connected_comp)
+            # isolate subgraph; passing full G crashes if orphan tables exist
+            subgraph = self.schema_graph.graph.subgraph(connected_comp)
             tree = steiner_tree(
-                component_graph,
+                subgraph,
                 terminal_nodes=unique_terminals,
                 weight="weight",
             )
         except Exception as err:
-            raise DisconnectedGraphError(f"Failed to compute join tree: {err}") from err
+            raise DisconnectedGraphError(f"failed to compute join tree: {err}") from err
 
-        # Determine optimal root table (heuristic: fact table with highest row count or highest degree)
         if not root_table or root_table not in tree:
             root_table = self._select_optimal_root(tree, unique_terminals)
 
-        # Traverse the tree via BFS from root to construct the exact JOIN sequence
         steps: list[JoinStep] = []
         total_weight = 0.0
 
         for u, v in nx.bfs_edges(tree, root_table):
             edge_meta = self.schema_graph.get_edge_metadata(u, v)
-            weight = edge_meta.get("weight", 1.0)
-            total_weight += weight
+            total_weight += edge_meta.get("weight", 1.0)
 
-            # Resolve join column direction between u (existing) and v (newly joined)
             rel_from = edge_meta.get("from_col")
             rel_to = edge_meta.get("to_col")
 
-            # Check which node was the source in the original relationship
             contract_u = self.schema_graph.get_contract(u)
             u_is_source = False
             if contract_u:
@@ -113,14 +100,13 @@ class SteinerJoinSolver:
         )
 
     def _select_optimal_root(self, tree: nx.Graph, terminals: list[str]) -> str:
-        """Pick the root table with the largest row count (fact table) among terminals."""
+        # bias root toward fact tables so the SQL naturally starts FROM the fact
         candidate = terminals[0]
         max_rows = -1
 
         for t in terminals:
             contract = self.schema_graph.get_contract(t)
             row_count = contract.row_count if contract else 0
-            # Bias toward fact tables
             if contract and contract.role == "fact":
                 row_count *= 10
 

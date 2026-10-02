@@ -52,12 +52,24 @@ PROHIBITED_FUNCTIONS = {
 }
 
 
+import re
+
+PII_COLUMN_PATTERNS = re.compile(
+    r"(ssn|citizen|national_id|salary|wage|bonus|credit_card|card_num|cvv|password|passwd|secret|token|bank_acc|iban|passport)",
+    re.IGNORECASE,
+)
+
+
 class ASTGuard:
     def validate(
         self,
         sql: str,
         dialect: str | None = None,
         allow_cartesian: bool = False,
+        block_unaggregated_pii: bool = True,
+        blocked_columns: set[str] | None = None,
+        max_joins: int | None = 10,
+        max_subquery_depth: int | None = 4,
     ) -> exp.Expression:
         # sqlglot can parse multiple statements; reject if empty or multi-statement
         try:
@@ -99,6 +111,42 @@ class ASTGuard:
             t_name = (table.name or "").lower()
             if t_name in PROHIBITED_FUNCTIONS or t_name.startswith(("xp_", "sp_oa")):
                 raise ASTSecurityViolation(f"Prohibited table function detected: {t_name}")
+
+        # Column-Level DLP and PII Protection
+        if block_unaggregated_pii or blocked_columns:
+            for col in stmt.find_all(exp.Column):
+                col_name = col.name.lower()
+                is_pii = bool(PII_COLUMN_PATTERNS.search(col_name))
+                if blocked_columns and col_name in {c.lower() for c in blocked_columns}:
+                    is_pii = True
+
+                if is_pii and col.find_ancestor(exp.AggFunc) is None:
+                    # check if column is projected inside an aggregate function (COUNT, SUM, AVG, MIN, MAX)
+                    raise ASTSecurityViolation(
+                        f"DLP Policy Violation: Direct selection of restricted/PII column '{col.name}' without aggregation is blocked."
+                    )
+
+        # Query Complexity Limits
+        if max_joins is not None:
+            for select_expr in stmt.find_all(exp.Select):
+                joins = select_expr.args.get("joins") or []
+                if len(joins) > max_joins:
+                    raise ASTSecurityViolation(
+                        f"Query complexity exceeded: Found {len(joins)} joins, maximum allowed is {max_joins}."
+                    )
+
+        if max_subquery_depth is not None:
+            for select_expr in stmt.find_all(exp.Select):
+                depth = 0
+                curr = select_expr.parent
+                while curr is not None:
+                    if isinstance(curr, exp.Select):
+                        depth += 1
+                    curr = curr.parent
+                if depth > max_subquery_depth:
+                    raise ASTSecurityViolation(
+                        f"Query complexity exceeded: Subquery nesting depth {depth} exceeds maximum {max_subquery_depth}."
+                    )
 
         if not allow_cartesian:
             for select_expr in stmt.find_all(exp.Select):
@@ -145,9 +193,21 @@ class ASTGuard:
         max_rows: int = 100,
         inject_nolock: bool = True,
         allow_cartesian: bool = False,
+        block_unaggregated_pii: bool = True,
+        blocked_columns: set[str] | None = None,
+        max_joins: int | None = 10,
+        max_subquery_depth: int | None = 4,
     ) -> str:
-        # validates first to reject mutations and Cartesian joins
-        stmt = self.validate(sql, dialect=dialect, allow_cartesian=allow_cartesian)
+        # validates first to reject mutations, Cartesian joins, and DLP violations
+        stmt = self.validate(
+            sql,
+            dialect=dialect,
+            allow_cartesian=allow_cartesian,
+            block_unaggregated_pii=block_unaggregated_pii,
+            blocked_columns=blocked_columns,
+            max_joins=max_joins,
+            max_subquery_depth=max_subquery_depth,
+        )
 
         # enforce positive integer row limit
         max_rows = max(1, max_rows)

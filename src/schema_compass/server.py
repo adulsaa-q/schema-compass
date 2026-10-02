@@ -5,7 +5,9 @@ from schema_compass.graph.schema_graph import SchemaGraph
 from schema_compass.graph.steiner_solver import SteinerJoinSolver
 from schema_compass.models import DisconnectedGraphError, TableContract
 from schema_compass.profiler.contract import format_contract
+from schema_compass.profiler.erd import generate_mermaid_erd
 from schema_compass.safety.ast_guard import ASTGuard, ASTSecurityViolation
+from schema_compass.safety.audit import AuditLogger
 
 
 def create_server(contracts: list[TableContract] | None = None) -> MCPServer:
@@ -110,17 +112,52 @@ def create_server(contracts: list[TableContract] | None = None) -> MCPServer:
             return f"No documented metric or column found matching '{metric_name}'."
         return f"Metric definitions for '{metric_name}':\n" + "\n".join(found)
 
+    audit_logger = AuditLogger()
+
+    @server.tool(
+        name="get_schema_diagram",
+        description="Generates an Entity-Relationship (ER) diagram in Mermaid format for the requested tables or entire schema",
+    )
+    def get_schema_diagram(tables: list[str] | None = None) -> str:
+        if not loaded_contracts:
+            return "No tables in catalog to generate diagram."
+
+        if tables:
+            selected_names = {t.strip().lower() for t in tables}
+            filtered: list[TableContract] = []
+            for c in loaded_contracts:
+                if c.name.lower() in selected_names or c.full_name.lower() in selected_names:
+                    filtered.append(c)
+                else:
+                    for rel in c.relationships:
+                        if rel.target_table.lower() in selected_names:
+                            filtered.append(c)
+                            break
+            target_tables = filtered or loaded_contracts
+        else:
+            target_tables = loaded_contracts
+
+        erd_code = generate_mermaid_erd(target_tables)
+        return f"```mermaid\n{erd_code}\n```"
+
     @server.tool(
         name="execute_safe_query",
-        description="Validates SQL via AST traversal, enforces read-only execution, and clamps row limits (TOP/LIMIT)",
+        description="Validates SQL via AST traversal, enforces read-only execution, DLP checks, and clamps row limits (TOP/LIMIT)",
     )
     def execute_safe_query(sql: str, dialect: str = "tsql", max_rows: int = 100) -> str:
         try:
             rewritten_sql = guard.rewrite(sql, dialect=dialect, max_rows=max_rows)
+            audit_logger.log_query(sql=sql, dialect=dialect, allowed=True, max_rows=max_rows)
             return f"Validated Safe SQL ({dialect}):\n{rewritten_sql}"
         except ASTSecurityViolation as e:
+            audit_logger.log_query(
+                sql=sql, dialect=dialect, allowed=False, reason=str(e), max_rows=max_rows
+            )
             return f"Security violation: {e}"
         except (ParseError, ValueError, TypeError) as e:
+            audit_logger.log_query(
+                sql=sql, dialect=dialect, allowed=False, reason=str(e), max_rows=max_rows
+            )
             return f"Query validation error: {e}"
 
     return server

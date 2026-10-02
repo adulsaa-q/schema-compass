@@ -17,6 +17,8 @@ htmlcov/
 *.db
 *.sqlite
 *.log
+*.jsonl
+.remember/
 .secrets/
 *.env
 

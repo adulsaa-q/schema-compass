@@ -76,6 +76,15 @@ async def test_execute_safe_query_tool_rejects_dangerous(server) -> None:
     assert "Security violation" in text or "error" in text.lower()
 
 
+@pytest.mark.anyio
+async def test_get_schema_diagram_tool(server) -> None:
+    res = await server.call_tool("get_schema_diagram", {"tables": ["orders", "customers"]})
+    text = res.content[0].text
+    assert "erDiagram" in text
+    assert "orders" in text
+    assert "customers" in text
+
+
 def test_load_contracts_from_json(tmp_path) -> None:
     import json
 

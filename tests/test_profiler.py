@@ -58,6 +58,11 @@ def test_format_contract_compact(sample_orders_contract: TableContract) -> None:
     assert "COMPLETED" in output
 
 
+def test_format_contract_compact_inlines_fk_target(sample_orders_contract: TableContract) -> None:
+    output = format_contract(sample_orders_contract, mode="compact")
+    assert "FK -> customers.customer_id" in output
+
+
 def test_format_contract_full(sample_orders_contract: TableContract) -> None:
     output = format_contract(sample_orders_contract, mode="full")
 

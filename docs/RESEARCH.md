@@ -28,7 +28,7 @@ We model the relational database as an undirected weighted graph $G = (V, E)$:
 * **Edges ($E$):** Primary-to-Foreign Key or inferred relationships.
 * **Edge Weights ($W(e)$):** Calculated from join certainty and selectivity:
 
-$$W(e) = \alpha \cdot C_{\text{type}} + \beta \cdot \log_{10}(\text{Cardinality}) + \gamma \cdot \text{NullRate}$$
+$$W(e) = \alpha \cdot C_{\text{type}} + \beta \cdot \log_{10}(\max(\text{Cardinality}, 1)) + \gamma \cdot \text{NullRate}$$
 
 | Relationship Type ($C_{\text{type}}$) | Weight Factor | Definition |
 | :--- | :---: | :--- |

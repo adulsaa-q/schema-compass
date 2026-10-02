@@ -4,6 +4,8 @@ from schema_compass.models import ColumnInfo, Relationship, TableContract
 from schema_compass.profiler.kimball import classify_table_role
 
 GET_TABLES_SQL = """
+SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+
 SELECT
     s.name AS schema_name,
     t.name AS table_name,
@@ -20,6 +22,8 @@ ORDER BY s.name, t.name;
 """
 
 GET_COLUMNS_SQL = """
+SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+
 SELECT
     s.name AS schema_name,
     t.name AS table_name,
@@ -33,13 +37,13 @@ INNER JOIN sys.tables t ON c.object_id = t.object_id
 INNER JOIN sys.schemas s ON t.schema_id = s.schema_id
 INNER JOIN sys.types tp ON c.user_type_id = tp.user_type_id
 LEFT JOIN (
-    SELECT ic.object_id, ic.column_id, 1 AS is_pk
+    SELECT DISTINCT ic.object_id, ic.column_id, 1 AS is_pk
     FROM sys.index_columns ic
     INNER JOIN sys.indexes i ON ic.object_id = i.object_id AND ic.index_id = i.index_id
     WHERE i.is_primary_key = 1
 ) pk ON c.object_id = pk.object_id AND c.column_id = pk.column_id
 LEFT JOIN (
-    SELECT fkc.parent_object_id AS object_id, fkc.parent_column_id AS column_id, 1 AS is_fk
+    SELECT DISTINCT fkc.parent_object_id AS object_id, fkc.parent_column_id AS column_id, 1 AS is_fk
     FROM sys.foreign_key_columns fkc
 ) fk ON c.object_id = fk.object_id AND c.column_id = fk.column_id
 WHERE t.is_ms_shipped = 0
@@ -47,7 +51,9 @@ ORDER BY s.name, t.name, c.column_id;
 """
 
 GET_FOREIGN_KEYS_SQL = """
-SELECT
+SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+
+SELECT DISTINCT
     fk.name AS fk_name,
     s_from.name AS from_schema,
     t_from.name AS from_table,

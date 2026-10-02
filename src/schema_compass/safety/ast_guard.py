@@ -24,7 +24,32 @@ PROHIBITED_NODES = (
     exp.Grant,
     exp.Revoke,
     exp.Pragma,
+    exp.Copy,
 )
+
+PROHIBITED_FUNCTIONS = {
+    # SQL Server extended stored procedures and remote query providers
+    "xp_cmdshell",
+    "sp_oacreate",
+    "sp_oamethod",
+    "sp_oagetproperty",
+    "sp_oasetproperty",
+    "xp_dirtree",
+    "xp_fileexist",
+    "xp_regread",
+    "xp_regwrite",
+    "opendatasource",
+    "openrowset",
+    "openquery",
+    # PostgreSQL administrative and file/network access functions
+    "pg_read_file",
+    "pg_write_file",
+    "pg_read_binary_file",
+    "dblink",
+    "dblink_exec",
+    # SQLite dynamic extension loading
+    "load_extension",
+}
 
 
 class ASTGuard:
@@ -62,15 +87,54 @@ class ASTGuard:
                     f"Prohibited node detected in AST: {prohibited.__name__} ({found.sql()[:50]})"
                 )
 
+        # scan for dangerous functions / procedures / remote providers
+        for func in stmt.find_all(exp.Func, exp.Anonymous):
+            func_name = (func.name or func.sql_name() or "").lower()
+            if func_name in PROHIBITED_FUNCTIONS or func_name.startswith(("xp_", "sp_oa")):
+                raise ASTSecurityViolation(
+                    f"Prohibited function or procedure detected: {func_name}"
+                )
+
+        for table in stmt.find_all(exp.Table):
+            t_name = (table.name or "").lower()
+            if t_name in PROHIBITED_FUNCTIONS or t_name.startswith(("xp_", "sp_oa")):
+                raise ASTSecurityViolation(f"Prohibited table function detected: {t_name}")
+
         if not allow_cartesian:
             for select_expr in stmt.find_all(exp.Select):
-                has_where = select_expr.args.get("where") is not None
-                for join in select_expr.find_all(exp.Join):
+                where_node = select_expr.args.get("where")
+                where_tables: set[str] = set()
+                if where_node is not None:
+                    for col in where_node.find_all(exp.Column):
+                        if col.table:
+                            where_tables.add(col.table.lower())
+
+                # Inspect only direct joins of this Select node to avoid subquery scope leaks
+                joins = select_expr.args.get("joins") or []
+                for join in joins:
                     has_on_or_using = bool(join.args.get("on") or join.args.get("using"))
-                    if not has_on_or_using and not has_where:
+                    is_cross = (
+                        bool(join.kind and "CROSS" in join.kind.upper())
+                        or join.args.get("kind") == "CROSS"
+                    )
+
+                    # Explicit CROSS JOIN without condition is always a Cartesian violation
+                    if is_cross and not has_on_or_using:
                         raise ASTSecurityViolation(
-                            f"Unconstrained Cartesian join detected: {join.sql()}. Queries must specify ON, USING, or WHERE conditions."
+                            f"Unconstrained Cartesian join detected: {join.sql()}. CROSS JOIN without condition blocked."
                         )
+
+                    # Implicit comma join or unconstrained join must have participating table in WHERE
+                    if not has_on_or_using:
+                        table_name = (
+                            join.this.alias_or_name.lower()
+                            if hasattr(join.this, "alias_or_name")
+                            else ""
+                        )
+                        if not table_name or table_name not in where_tables:
+                            raise ASTSecurityViolation(
+                                f"Unconstrained Cartesian join detected: {join.sql()}. Queries must specify ON, USING, or WHERE conditions."
+                            )
 
         return stmt
 
@@ -85,13 +149,18 @@ class ASTGuard:
         # validates first to reject mutations and Cartesian joins
         stmt = self.validate(sql, dialect=dialect, allow_cartesian=allow_cartesian)
 
+        # enforce positive integer row limit
+        max_rows = max(1, max_rows)
+
         # clone AST to avoid modifying input
         ast = stmt.copy()
 
         # clamp or inject row limit on the root query
         limit_node = ast.args.get("limit")
         if limit_node is not None:
-            expr = limit_node.expression
+            expr = limit_node.expression or limit_node.args.get("count")
+            if isinstance(expr, exp.Paren):
+                expr = expr.this
             try:
                 curr_limit = int(str(expr))
                 if curr_limit > max_rows:
@@ -105,8 +174,13 @@ class ASTGuard:
         if dialect.lower() in ("tsql", "mssql", "sqlserver") and inject_nolock:
             cte_names = {cte.alias_or_name.lower() for cte in ast.find_all(exp.CTE)}
             for table in ast.find_all(exp.Table):
-                # CTE references and tables that already have hints must not get duplicate hints
-                if table.name.lower() not in cte_names and not table.args.get("hints"):
+                # Only physical named tables receive hints; skip table variables (@var), TVFs, and CTEs
+                if not isinstance(table.this, exp.Identifier):
+                    continue
+                tbl_name = table.name.lower()
+                if tbl_name.startswith("@") or tbl_name in cte_names:
+                    continue
+                if not table.args.get("hints"):
                     table.set("hints", [exp.WithTableHint(expressions=[exp.var("NOLOCK")])])
 
         return ast.sql(dialect=dialect)

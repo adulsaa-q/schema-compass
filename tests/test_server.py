@@ -34,8 +34,8 @@ async def test_search_catalog_tool(server) -> None:
 async def test_get_join_tree_tool(server) -> None:
     res = await server.call_tool("get_join_tree", {"tables": ["orders", "products"]})
     text = res.content[0].text
-    assert "FROM orders" in text
-    assert "order_items" in text
+    assert "FROM order_items" in text
+    assert "orders" in text
     assert "products" in text
 
 

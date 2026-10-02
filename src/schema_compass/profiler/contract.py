@@ -19,7 +19,16 @@ def format_contract(contract: TableContract, mode: Literal["compact", "full"] = 
         if col.is_pk:
             flags.append("PK")
         if col.is_fk:
-            flags.append("FK")
+            # Inline FK target in compact format to prevent hallucinated joins
+            fk_targets = [
+                f"{rel.target_table}.{rel.target_column}"
+                for rel in contract.relationships
+                if rel.source_column == col.name
+            ]
+            if fk_targets:
+                flags.append(f"FK -> {', '.join(fk_targets)}")
+            else:
+                flags.append("FK")
         if not col.nullable:
             flags.append("NOT NULL")
 

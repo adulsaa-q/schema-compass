@@ -60,8 +60,17 @@ class SteinerJoinSolver:
             edge_meta = self.schema_graph.get_edge_metadata(u, v)
             total_weight += edge_meta.get("weight", 1.0)
 
-            rel_from = edge_meta.get("from_col")
-            rel_to = edge_meta.get("to_col")
+            # Determine column alignment based on edge metadata
+            src_table = edge_meta.get("source_table")
+            if src_table == u:
+                rel_from = edge_meta.get("source_col")
+                rel_to = edge_meta.get("target_col")
+            elif src_table == v:
+                rel_from = edge_meta.get("target_col")
+                rel_to = edge_meta.get("source_col")
+            else:
+                rel_from = edge_meta.get("from_col")
+                rel_to = edge_meta.get("to_col")
 
             contract_u = self.schema_graph.get_contract(u)
             u_is_source = False
@@ -101,10 +110,11 @@ class SteinerJoinSolver:
 
     def _select_optimal_root(self, tree: nx.Graph, terminals: list[str]) -> str:
         # bias root toward fact tables so the SQL naturally starts FROM the fact
-        candidate = terminals[0]
+        candidate = terminals[0] if terminals else next(iter(tree.nodes))
         max_rows = -1
 
-        for t in terminals:
+        # evaluate all nodes in the Steiner tree (including intermediate Steiner fact tables)
+        for t in tree.nodes:
             contract = self.schema_graph.get_contract(t)
             row_count = contract.row_count if contract else 0
             if contract and contract.role == "fact":

@@ -118,3 +118,51 @@ def test_rewrites_tsql_skips_nolock_on_ctes(guard: ASTGuard) -> None:
 def test_rewrite_rejects_security_violations(guard: ASTGuard) -> None:
     with pytest.raises(ASTSecurityViolation):
         guard.rewrite("DROP TABLE users", dialect="tsql")
+
+
+def test_rejects_dangerous_functions_and_procedures(guard: ASTGuard) -> None:
+    dangerous = [
+        ("SELECT xp_cmdshell('dir')", "tsql"),
+        ("SELECT sp_OACreate('WScript.Shell', 1)", "tsql"),
+        ("SELECT xp_dirtree('C:\\\\', 1, 1)", "tsql"),
+        ("SELECT * FROM OPENROWSET('SQLNCLI', 'Server=x', 'SELECT 1')", "tsql"),
+        ("SELECT * FROM OPENDATASOURCE('SQLNCLI', 'Data Source=x').db.dbo.users", "tsql"),
+        ("SELECT * FROM OPENQUERY(linked_server, 'SELECT 1')", "tsql"),
+        ("SELECT load_extension('/tmp/evil.so')", "sqlite"),
+        ("SELECT pg_read_file('/etc/passwd')", "postgres"),
+    ]
+    for sql, dialect in dangerous:
+        with pytest.raises(ASTSecurityViolation):
+            guard.validate(sql, dialect=dialect)
+
+
+def test_rejects_explicit_cross_join_even_with_where(guard: ASTGuard) -> None:
+    sql = "SELECT * FROM orders CROSS JOIN customers WHERE 1 = 1"
+    with pytest.raises(ASTSecurityViolation):
+        guard.validate(sql)
+
+
+def test_subquery_constrained_join_allowed_without_outer_where(guard: ASTGuard) -> None:
+    sql = "SELECT * FROM (SELECT * FROM a JOIN b ON a.id = b.id) AS sub"
+    stmt = guard.validate(sql)
+    assert stmt is not None
+
+
+def test_clamped_row_limit_with_parentheses_top(guard: ASTGuard) -> None:
+    # TOP (5) should not be overridden and expanded to 100
+    res = guard.rewrite("SELECT TOP (5) id FROM users", dialect="tsql", max_rows=100)
+    assert "TOP 5" in res or "TOP (5)" in res
+    assert "TOP 100" not in res
+
+
+def test_rewrites_negative_max_rows_clamped(guard: ASTGuard) -> None:
+    res = guard.rewrite("SELECT id FROM users", dialect="postgres", max_rows=-1)
+    assert "LIMIT 1" in res
+    assert "LIMIT -1" not in res
+
+
+def test_tsql_skips_nolock_on_table_valued_functions(guard: ASTGuard) -> None:
+    sql = "SELECT value FROM STRING_SPLIT('a,b,c', ',')"
+    res = guard.rewrite(sql, dialect="tsql", max_rows=100)
+    assert "STRING_SPLIT" in res
+    assert "WITH (NOLOCK)" not in res

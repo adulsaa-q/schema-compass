@@ -37,10 +37,22 @@ class SchemaGraph:
         if not self.graph.has_node(rel.target_table):
             self.graph.add_node(rel.target_table)
 
+        # Retain minimal-weight relationship if edge already exists
+        if self.graph.has_edge(rel.source_table, rel.target_table):
+            existing_weight = self.graph[rel.source_table][rel.target_table].get(
+                "weight", float("inf")
+            )
+            if rel.weight >= existing_weight:
+                return
+
         self.graph.add_edge(
             rel.source_table,
             rel.target_table,
             weight=rel.weight,
+            source_table=rel.source_table,
+            target_table=rel.target_table,
+            source_col=rel.source_column,
+            target_col=rel.target_column,
             from_col=rel.source_column,
             to_col=rel.target_column,
             rel_type=rel.relationship_type,

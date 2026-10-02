@@ -1,0 +1,136 @@
+from mcp.server.mcpserver import MCPServer
+from sqlglot.errors import ParseError
+
+from schema_compass.graph.schema_graph import SchemaGraph
+from schema_compass.graph.steiner_solver import SteinerJoinSolver
+from schema_compass.models import DisconnectedGraphError, TableContract
+from schema_compass.profiler.contract import format_contract
+from schema_compass.safety.ast_guard import ASTGuard, ASTSecurityViolation
+
+
+def create_server(contracts: list[TableContract] | None = None) -> MCPServer:
+    server = MCPServer(
+        name="schema-compass",
+        description="Database topology navigator and AST safety gateway",
+    )
+
+    loaded_contracts = contracts or []
+    contracts_by_name: dict[str, TableContract] = {c.name.lower(): c for c in loaded_contracts}
+    for c in loaded_contracts:
+        contracts_by_name[c.full_name.lower()] = c
+
+    graph = SchemaGraph()
+    if loaded_contracts:
+        graph.load_contracts(loaded_contracts)
+
+    solver = SteinerJoinSolver(graph)
+    guard = ASTGuard()
+
+    @server.tool(
+        name="search_catalog",
+        description="Search database catalog for tables, views, and columns matching keywords",
+    )
+    def search_catalog(query: str, top_k: int = 5) -> str:
+        # rank tables by keyword matches in table name, description, and column attributes
+        q = query.strip().lower()
+        if not q:
+            return "No query provided."
+
+        matches: list[tuple[float, TableContract, list[str]]] = []
+        for contract in loaded_contracts:
+            score = 0.0
+            matched_cols: list[str] = []
+            if q in contract.name.lower():
+                score += 10.0
+            if contract.description and q in contract.description.lower():
+                score += 3.0
+            for col in contract.columns:
+                if q in col.name.lower():
+                    score += 5.0
+                    matched_cols.append(col.name)
+                elif col.description and q in col.description.lower():
+                    score += 2.0
+                    matched_cols.append(col.name)
+
+            if score > 0:
+                matches.append((score, contract, matched_cols))
+
+        matches.sort(key=lambda x: x[0], reverse=True)
+        top_matches = matches[:top_k]
+
+        if not top_matches:
+            return f"No catalog matches found for '{query}'."
+
+        lines = [f"Found {len(top_matches)} catalog matches for '{query}':"]
+        for _, c, cols in top_matches:
+            col_hint = f" (matched columns: {', '.join(cols)})" if cols else ""
+            lines.append(f"- **{c.full_name}** [{c.role} | {c.row_count:,} rows]{col_hint}")
+        return "\n".join(lines)
+
+    @server.tool(
+        name="get_join_tree",
+        description="Computes minimal Steiner join path connecting requested tables and returns SQL FROM ... JOIN clause",
+    )
+    def get_join_tree(tables: list[str]) -> str:
+        # minimum Steiner tree across terminal tables
+        if len(tables) < 2:
+            return "At least 2 tables are required to calculate a join tree."
+        try:
+            tree = solver.solve(tables)
+            return tree.to_sql_from_clause()
+        except (DisconnectedGraphError, KeyError, ValueError) as e:
+            return f"Failed to compute join tree: {e}"
+
+    @server.tool(
+        name="get_table_contract",
+        description="Returns Minimal Effective Context (MEC) schema contract (< 200 tokens) with column types, keys, and samples",
+    )
+    def get_table_contract(table_name: str, mode: str = "compact") -> str:
+        tname = table_name.strip().lower()
+        contract = contracts_by_name.get(tname)
+        if not contract:
+            return f"Table '{table_name}' not found in catalog."
+        return format_contract(contract, mode="full" if mode.lower() == "full" else "compact")
+
+    @server.tool(
+        name="explain_metric",
+        description="Returns business definition, calculation formula, and upstream column lineage for standard or documented metrics",
+    )
+    def explain_metric(metric_name: str) -> str:
+        # look for columns matching metric name
+        q = metric_name.strip().lower()
+        found: list[str] = []
+        for contract in loaded_contracts:
+            for col in contract.columns:
+                if q in col.name.lower():
+                    found.append(
+                        f"- Table: {contract.full_name}, Column: {col.name} ({col.data_type})"
+                    )
+        if not found:
+            return f"No documented metric or column found matching '{metric_name}'."
+        return f"Metric definitions for '{metric_name}':\n" + "\n".join(found)
+
+    @server.tool(
+        name="execute_safe_query",
+        description="Validates SQL via AST traversal, enforces read-only execution, and clamps row limits (TOP/LIMIT)",
+    )
+    def execute_safe_query(sql: str, dialect: str = "tsql", max_rows: int = 100) -> str:
+        try:
+            rewritten_sql = guard.rewrite(sql, dialect=dialect, max_rows=max_rows)
+            return f"Validated Safe SQL ({dialect}):\n{rewritten_sql}"
+        except ASTSecurityViolation as e:
+            return f"Security violation: {e}"
+        except (ParseError, ValueError, TypeError) as e:
+            return f"Query validation error: {e}"
+
+    return server
+
+
+def main() -> None:
+    # default entrypoint running over stdio for MCP clients
+    server = create_server()
+    server.run(transport="stdio")
+
+
+if __name__ == "__main__":
+    main()

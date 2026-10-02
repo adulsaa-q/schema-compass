@@ -237,3 +237,5 @@ SAMPLE_TABLES: dict[str, TableContract] = {
         relationships=[],
     ),
 }
+
+SAMPLE_CONTRACTS: list[TableContract] = list(SAMPLE_TABLES.values())

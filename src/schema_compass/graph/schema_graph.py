@@ -29,6 +29,8 @@ class SchemaGraph:
         for c in contracts:
             self.add_table(c)
 
+    load_contracts = load_tables
+
     def add_relationship(self, rel: Relationship) -> None:
         if not self.graph.has_node(rel.source_table):
             self.graph.add_node(rel.source_table)

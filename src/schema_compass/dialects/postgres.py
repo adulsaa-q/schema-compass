@@ -1,7 +1,7 @@
 from typing import Any
 
 from schema_compass.models import ColumnInfo, Relationship, TableContract
-from schema_compass.profiler.kimball import classify_table_role
+from schema_compass.profiler.kimball import classify_table_role, refine_roles
 
 GET_TABLES_SQL = """
 SELECT
@@ -144,7 +144,7 @@ class PostgresAdapter:
                 )
             )
 
-        return contracts
+        return refine_roles(contracts)
 
     def extract_contracts(self) -> list[TableContract]:
         if not self.connection:

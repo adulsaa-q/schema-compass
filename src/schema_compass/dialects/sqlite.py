@@ -1,7 +1,7 @@
 import sqlite3
 
 from schema_compass.models import ColumnInfo, Relationship, TableContract
-from schema_compass.profiler.kimball import classify_table_role
+from schema_compass.profiler.kimball import classify_table_role, refine_roles
 
 
 class SQLiteAdapter:
@@ -83,4 +83,4 @@ class SQLiteAdapter:
                 )
             )
 
-        return contracts
+        return refine_roles(contracts)

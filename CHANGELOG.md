@@ -3,6 +3,19 @@
 All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [SemVer](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+- Table roles were wrong whenever a dimension had a price and several foreign keys. On the Chinook
+  sample `Track` was labelled a fact (it has `UnitPrice` and three foreign keys) while `Invoice` was a
+  dimension. Because the join solver starts from the biggest fact, `get_join_tree` began at `Track`
+  instead of `InvoiceLine`. Roles are now refined after all tables are read, using which tables
+  reference which: a table that other tables point at is not a leaf fact, and a dated table with an
+  additive total (an invoice header) is a fact. Explicit `fact_` / `dim_` prefixes still win, and
+  singular names such as `Invoice` are recognised like `invoices`.
+- Roles saved in a schema JSON exported by an earlier version are used as written. Re-export to
+  pick up the corrected roles.
+
 ## [0.2.0] - 2026-10-08
 
 **Breaking:** the SQL guard now rejects anything it does not recognise as safe. Queries that use

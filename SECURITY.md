@@ -45,6 +45,10 @@ Known limits (not protected):
   folded, an equality must tie the new table (one side) to earlier tables (other side), and subqueries,
   repeated columns (`a.id - a.id`) and `* 0` do not count. Someone can still write a condition that is
   always true in a way the guard cannot see; that is undecidable in general.
+- The guard has no schema, so a join condition written with unqualified columns (`ON x = y`) is
+  given the benefit of the doubt even when both columns belong to the joined table. Qualify columns
+  (`a.x = b.y`) to get the full check. Joins that are linked but multiply rows (`ON a.flag = b.flag`)
+  are not Cartesian by this definition and are not detected.
 - A join with only a range condition (`ON a.d BETWEEN b.s AND b.e`) is rejected; add an equality on
   the key or pass `allow_cartesian=True` through the Python API.
 - The column-level PII filter is name-based (`salary`, `password`, ...) and will not catch a

@@ -20,7 +20,9 @@ Blocked by default:
   hard-deny list for file/OS access, sleeps and state changes (`nextval`, advisory locks, `lo_*`);
 - reads of system catalogs (`sys.*`, `pg_catalog`, `pg_shadow`, `sqlite_master`, `mysql.*`, `master..`);
 - table hints that take locks (`TABLOCKX`, `UPDLOCK`, `HOLDLOCK`, ...) and `OPTION (MAXRECURSION 0)`;
-- recursive CTEs, unconstrained Cartesian joins, and queries over the join or nesting limits.
+- recursive CTEs, unconstrained Cartesian joins (a subquery, `LATERAL` or `APPLY` that merely mentions an
+  outer column does not count as a join condition), and queries over the join or nesting limits;
+- four-part names (`server.db.schema.table`), which reach linked servers.
 
 Opt in with `--allow-function NAME`, `--allow-recursive-cte`, `--allow-system-catalogs`
 (or the matching `ASTGuard(...)` arguments). Hard-denied functions cannot be unlocked.
@@ -32,6 +34,8 @@ Known limits (not protected):
   timeout on the database user.
 - `NOLOCK` avoids blocking writers but can return uncommitted rows, so results may be inconsistent.
 - Server version and session variables such as `@@version` are readable.
+- The guard parses with the dialect you pass. Pass the dialect of the server that will run the query,
+  and run the SQL that `execute_safe_query` returns, not the original text.
 - The column-level PII filter is name-based (`salary`, `password`, ...) and will not catch a
   sensitive column with an innocent name.
 

@@ -23,6 +23,10 @@ All notable changes to this project are documented here. Format follows
   `NOLOCK`/`READUNCOMMITTED`/index hints pass. `OPTION (MAXRECURSION 0)` and recursive CTEs are blocked.
 - New opt-ins: `ASTGuard(extra_allowed_functions=, allow_recursive_cte=, allow_system_catalogs=)` and CLI flags
   `--allow-function`, `--allow-recursive-cte`, `--allow-system-catalogs`. Hard-denied functions cannot be unlocked.
+- Four-part names (linked servers) are blocked, and every part of a name is checked against the system
+  catalog list. `OPTION (MAXRECURSION n)` must be a literal between 1 and 32767.
+- A correlated join is only excused for table functions (`FROM t, json_each(t.j)`), not for subqueries,
+  `LATERAL` or `CROSS APPLY`, which could be made to pass as a Cartesian product with a dummy reference.
 - SECURITY.md now states what the guard does not protect against.
 
 ### Fixed (guard false positives)

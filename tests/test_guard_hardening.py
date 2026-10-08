@@ -143,3 +143,72 @@ def test_system_catalogs_can_be_enabled() -> None:
 def test_user_table_with_similar_name_is_not_flagged(guard: ASTGuard) -> None:
     guard.validate("SELECT * FROM system_events", dialect="tsql")
     guard.validate("SELECT * FROM sysadmin_notes", dialect="tsql")
+
+
+# --- found by a second round of probing (review findings) ---------------------------------
+
+CARTESIAN_VIA_FAKE_CORRELATION = [
+    ("sqlite", "SELECT * FROM orders o, (SELECT * FROM orders b WHERE o.order_id IS NOT NULL) x"),
+    (
+        "postgres",
+        "SELECT * FROM orders o CROSS JOIN LATERAL (SELECT * FROM orders b WHERE o.order_id > 0) x",
+    ),
+    ("tsql", "SELECT * FROM orders o CROSS APPLY (SELECT * FROM orders b WHERE o.order_id > 0) x"),
+]
+
+
+@pytest.mark.parametrize(("dialect", "sql"), CARTESIAN_VIA_FAKE_CORRELATION)
+def test_referencing_an_outer_table_does_not_excuse_a_cartesian_join(
+    guard: ASTGuard, dialect: str, sql: str
+) -> None:
+    with pytest.raises(ASTSecurityViolation):
+        guard.validate(sql, dialect=dialect)
+
+
+def test_table_function_over_an_earlier_table_is_still_allowed(guard: ASTGuard) -> None:
+    guard.validate("SELECT * FROM t, json_each(t.j)", dialect="sqlite")
+
+
+@pytest.mark.parametrize("literal", ["0", "00", "000", "0x0", "0X00", "-1", "abc", "@limit"])
+def test_maxrecursion_without_a_real_bound_is_blocked(literal: str) -> None:
+    sql = (
+        "WITH r AS (SELECT 1 n UNION ALL SELECT n + 1 FROM r) "
+        f"SELECT * FROM r OPTION (MAXRECURSION {literal})"
+    )
+    with pytest.raises(ASTSecurityViolation):
+        ASTGuard(allow_recursive_cte=True).validate(sql, dialect="tsql")
+
+
+def test_maxrecursion_with_a_bound_is_allowed_when_recursion_is_enabled() -> None:
+    sql = (
+        "WITH r AS (SELECT 1 n UNION ALL SELECT n + 1 FROM r WHERE n < 5) "
+        "SELECT * FROM r OPTION (MAXRECURSION 100)"
+    )
+    ASTGuard(allow_recursive_cte=True).validate(sql, dialect="tsql")
+
+
+@pytest.mark.parametrize(
+    ("dialect", "sql"),
+    [
+        ("tsql", "SELECT * FROM srv.master.sys.sql_logins"),
+        ("tsql", "SELECT * FROM linkedsrv.salesdb.dbo.orders"),
+        ("tsql", "SELECT * FROM [srv].[master].[sys].[sql_logins]"),
+    ],
+)
+def test_four_part_names_are_blocked_as_remote_server_access(
+    guard: ASTGuard, dialect: str, sql: str
+) -> None:
+    with pytest.raises(ASTSecurityViolation):
+        guard.validate(sql, dialect=dialect)
+
+
+def test_three_part_names_to_user_data_still_work(guard: ASTGuard) -> None:
+    guard.validate("SELECT * FROM salesdb.dbo.orders", dialect="tsql")
+    guard.validate(
+        "SELECT * FROM model", dialect="tsql"
+    )  # a user table that happens to be named model
+
+
+def test_mysql_executable_comment_is_neutralised_in_the_rewritten_sql(guard: ASTGuard) -> None:
+    out = guard.rewrite("SELECT 1 /*!50000 UNION SELECT user FROM mysql.user */", dialect="mysql")
+    assert "/*!" not in out

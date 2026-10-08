@@ -233,6 +233,8 @@ SYSTEM_TABLE_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
+MAX_NAME_PARTS = 3  # database.schema.table; more means a linked/remote server
+MAX_RECURSION_LIMIT = 32_767  # SQL Server's own ceiling for OPTION (MAXRECURSION n)
 MAX_SQL_LENGTH = 100_000  # 100 KB payload limit to prevent parser memory bombs
 
 
@@ -470,15 +472,17 @@ class ASTGuard:
                             "Only NOLOCK/READUNCOMMITTED and plain index hints are allowed."
                         )
 
-            if self.allow_system_catalogs or (name in cte_names and not table.db):
+            parts = [part.name.lower() for part in table.parts]
+            if len(parts) > MAX_NAME_PARTS:
+                raise ASTSecurityViolation(
+                    f"Four-part name '{table.sql()[:60]}' (linked server access) is blocked."
+                )
+            if self.allow_system_catalogs or (name in cte_names and len(parts) == 1):
                 continue
-            schema = (table.db or "").lower()
-            database = (table.catalog or "").lower()
-            if (
-                schema in SYSTEM_SCHEMAS
-                or database in SYSTEM_DATABASES
-                or SYSTEM_TABLE_PATTERN.search(name)
-            ):
+            qualifiers = parts[:-1]
+            if any(
+                q in SYSTEM_SCHEMAS or q in SYSTEM_DATABASES for q in qualifiers
+            ) or SYSTEM_TABLE_PATTERN.search(name):
                 raise ASTSecurityViolation(
                     f"Access to system catalog '{table.sql()[:60]}' is blocked "
                     "(it can expose credentials and server configuration)."
@@ -486,7 +490,17 @@ class ASTGuard:
 
     @staticmethod
     def _is_correlated(select: exp.Select, join: exp.Join) -> bool:
-        """True when the joined expression references a table that appears earlier in the FROM."""
+        """True for a table function fed by an earlier table, e.g. `FROM t, json_each(t.j)`.
+
+        Its row count is bounded by the value in each row. Subqueries, LATERAL and APPLY are
+        deliberately not excused: referencing an outer column once does not constrain the join.
+        """
+        target = join.this
+        is_table_function = isinstance(target, exp.Unnest) or (
+            isinstance(target, exp.Table) and isinstance(target.this, exp.Func)
+        )
+        if not is_table_function:
+            return False
         from_node = select.args.get("from") or select.args.get("from_")
         earlier = [from_node.this] if from_node is not None and from_node.this else []
         for other in select.args.get("joins") or []:
@@ -494,19 +508,19 @@ class ASTGuard:
                 break
             earlier.append(other.this)
         names = {e.alias_or_name.lower() for e in earlier if e is not None and e.alias_or_name}
-        target = join.this
-        if (
-            target is None
-            or isinstance(target, exp.Table)
-            and isinstance(target.this, exp.Identifier)
-        ):
-            return False  # a plain named table has nothing to correlate with
         return any(col.table.lower() in names for col in target.find_all(exp.Column) if col.table)
 
     def _check_query_options(self, stmt: exp.Query) -> None:
         for option in stmt.find_all(exp.QueryOption):
-            if (option.name or "").lower() == "maxrecursion" and str(option.expression) == "0":
-                raise ASTSecurityViolation("OPTION (MAXRECURSION 0) removes the recursion limit.")
+            if (option.name or "").lower() != "maxrecursion":
+                continue
+            value = option.expression
+            text = value.name if isinstance(value, exp.Literal) else ""
+            if not (text.isdigit() and 1 <= int(text) <= MAX_RECURSION_LIMIT):
+                raise ASTSecurityViolation(
+                    f"OPTION (MAXRECURSION {option.expression.sql() if value else ''}) does not "
+                    f"set a bound between 1 and {MAX_RECURSION_LIMIT}."
+                )
 
     def _check_no_recursion(self, stmt: exp.Query) -> None:
         for with_ in stmt.find_all(exp.With):

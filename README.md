@@ -1,14 +1,13 @@
 # schema-compass
 
-An open-source Model Context Protocol (MCP) server that acts as a schema topology navigator and deterministic AST safety gateway between AI coding agents (Claude Code, Cursor, Windsurf, Antigravity) and relational databases (SQL Server, PostgreSQL, SQLite, DuckDB).
+An open-source Model Context Protocol (MCP) server that gives AI coding agents (Claude Code, Cursor, Windsurf, Antigravity) a compact map of a relational schema, computes join paths between tables, and validates SQL through an AST-based read-only guard.
+
+**Status (v0.1, beta):** schema sources today are SQLite and offline JSON exports. SQL Server and PostgreSQL metadata adapters exist but are not wired into the CLI yet (see [Roadmap](#roadmap)). `execute_safe_query` validates and rewrites SQL; it does not run it against a database.
 
 [![CI](https://github.com/adulsaa-q/schema-compass/actions/workflows/ci.yml/badge.svg)](https://github.com/adulsaa-q/schema-compass/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/Python-3.12%2B-blue.svg)](https://www.python.org/)
 [![Model Context Protocol](https://img.shields.io/badge/MCP-Compatible-brightgreen.svg)](https://modelcontextprotocol.io/)
-[![Tests: 107 Passed](https://img.shields.io/badge/Tests-107%20Passed-brightgreen.svg)](tests/)
-[![Security: Hardened](https://img.shields.io/badge/Security-AST%20DLP%20Hardened-blueviolet.svg)](SECURITY.md)
-[![Ruff: Clean](https://img.shields.io/badge/Ruff-Compliant-brightgreen.svg)](https://astral.sh/ruff)
 
 ---
 
@@ -19,7 +18,7 @@ Enterprise databases with hundreds of tables exceed LLM context windows, leading
 
 Schema-Compass implements **Minimal Effective Context (MEC)**:
 - Instead of dumping raw DDLs, it serves compact table contracts under 200 tokens per table.
-- Contracts include column types, null rates, data samples, and inlined foreign key relationships (e.g. `- customer_id: INT (FK -> customers.customer_id)`).
+- Contracts include column types, keys, and inlined foreign key relationships (null rates and sample values are rendered when present, but the current extractors do not fill them yet) (e.g. `- customer_id: INT (FK -> customers.customer_id)`).
 
 ### 2. Hallucinated Joins and Cartesian Disasters
 When database schemas lack foreign keys or rely on implicit naming conventions, AI agents frequently hallucinate join keys or write accidental Cartesian products.
@@ -33,7 +32,7 @@ Many data teams cannot connect AI agents directly to corporate production server
 
 Schema-Compass features **Offline Schema Mode**:
 - Extract table names, column types, and constraints once into an offline JSON contract.
-- **Zero data, zero PII, and zero sensitive records** are ever extracted; only metadata is captured.
+- Only metadata (table names, column types, keys) is extracted. No row data is read.
 - AI agents run completely offline against the local JSON metadata file. No network connection to your live server is needed.
 
 ### 4. Deterministic AST Safety Gateway
@@ -60,8 +59,8 @@ flowchart LR
 
     subgraph DataSources ["Metadata Sources"]
         Engine <--> F[("Offline JSON Contract<br/>(Zero Server Risk)")]
-        Engine <--> G[("Local SQLite / DuckDB")]
-        Engine <--> H[("SQL Server / Postgres<br/>(Catalog DMVs)")]
+        Engine <--> G[("Local SQLite file")]
+        Engine <--> H[("SQL Server / Postgres<br/>(adapters only, CLI planned)")]
     end
 ```
 
@@ -75,7 +74,8 @@ flowchart LR
 | `get_join_tree` | `tables: list[str]` | SQL Code Block | Solves Minimum Steiner Join Tree and outputs exact `FROM ... JOIN ... ON` syntax. |
 | `get_table_contract` | `table_name: str`, `mode: str = 'compact'` | MEC Markdown | Returns compact column types, keys, sample values, and inlined FK references. |
 | `explain_metric` | `metric_name: str` | Lineage Summary | Provides business definitions, formulas, and upstream table/column lineage. |
-| `execute_safe_query` | `sql: str`, `dialect: str = 'tsql'`, `max_rows: int = 100` | Table / Results | Validates query through AST, injects hints, clamps limits, and executes safely. |
+| `get_schema_diagram` | `tables: list[str] \| None` | Mermaid ERD | Generates an entity-relationship diagram for the requested tables or the whole schema. |
+| `execute_safe_query` | `sql: str`, `dialect: str = 'tsql'`, `max_rows: int = 100` | Rewritten SQL | Validates the query through the AST guard, injects hints, clamps row limits, and returns the safe SQL. Does not execute it. |
 
 ---
 
@@ -93,8 +93,11 @@ cd schema-compass
 # Install dependencies with uv
 uv sync
 
-# Run the complete test suite (92 tests passed in ~2s)
+# Run the test suite
 uv run pytest
+
+# Start the server on the bundled example schema (no database needed)
+uv run schema-compass --source json --path examples/sample_schema.json
 ```
 
 ---
@@ -105,30 +108,23 @@ uv run pytest
 Export catalog metadata to an offline JSON file. You can commit this file to your repository or keep it on your workstation:
 
 ```bash
-# Export metadata from an SQLite database
-uv run python -m schema_compass.export --db sqlite --path chinook.db --output chinook_schema.json
+# Export metadata from a SQLite database
+uv run python -m schema_compass.export --db sqlite --path mydb.sqlite --output my_schema.json
 
 # Run MCP server using the offline JSON contract
-uv run schema-compass --source json --path chinook_schema.json
+uv run schema-compass --source json --path my_schema.json
 ```
 
-### Mode 2: Local SQLite / DuckDB Database
+A ready-made example lives in [`examples/sample_schema.json`](examples/sample_schema.json).
+
+### Mode 2: Local SQLite Database
 Point Schema-Compass directly to a local database file:
 
 ```bash
-uv run schema-compass --source sqlite --path chinook.db
+uv run schema-compass --source sqlite --path mydb.sqlite
 ```
 
-### Mode 3: Direct Database Catalog
-Schema-Compass can connect directly to SQL Server or PostgreSQL to inspect system metadata (`INFORMATION_SCHEMA` and system DMVs) using non-blocking read uncommitted queries:
-
-```bash
-# SQL Server (T-SQL)
-uv run schema-compass --source mssql --conn "DRIVER={ODBC Driver 18 for SQL Server};SERVER=localhost;DATABASE=mydb;UID=sa;PWD=secret;TrustServerCertificate=yes;"
-
-# PostgreSQL
-uv run schema-compass --source postgres --conn "postgresql://postgres:secret@localhost:5432/mydb"
-```
+SQL Server and PostgreSQL are not available as `--source` yet; see the [Roadmap](#roadmap).
 
 ---
 
@@ -138,7 +134,7 @@ uv run schema-compass --source postgres --conn "postgresql://postgres:secret@loc
 Add Schema-Compass to Claude Code with a single command:
 
 ```bash
-claude mcp add schema-compass -- uv --directory /absolute/path/to/schema-compass run schema-compass --source json --path /absolute/path/to/schema.json
+claude mcp add schema-compass -- uv --directory /absolute/path/to/schema-compass run schema-compass --source json --path /absolute/path/to/schema-compass/examples/sample_schema.json
 ```
 
 ### 2. Claude Desktop (`claude_desktop_config.json`)
@@ -209,47 +205,43 @@ claude mcp add schema-compass -- uv --directory /absolute/path/to/schema-compass
 
 ---
 
-## Empirical Benchmarks
-
-Run the built-in benchmark scripts:
+## Benchmarks
 
 ```bash
-# Real-world 11-table Chinook database benchmark (5-hop join in 3.195ms, 87.9% token savings)
 uv run python evals/eval_chinook_showcase.py
-
-# Multi-branch enterprise join benchmark (91.8% token savings)
 uv run python evals/eval_join_benchmark.py
 ```
 
-### Benchmark Results (Chinook Database)
-- **Metadata Extraction Time:** 1.258 ms (11 tables)
-- **5-Hop Join Tree Calculation:** 3.195 ms
-- **Token Efficiency:** Reduced prompt tokens from 511 tokens (raw DDL) down to 62 tokens (MEC contract), delivering an **87.9% token reduction**.
+`eval_chinook_showcase.py` builds an 11-table schema modelled on the Chinook sample database (the DDL is inlined in the script, no data) and measures a 5-hop join. On one Windows dev machine:
+
+| Metric | Result |
+| :--- | :--- |
+| Metadata extraction (11 tables) | ~1.3 ms |
+| 5-hop join tree | ~3.2 ms |
+| Prompt size, raw DDL vs. compact contract | 511 vs. 62 tokens (-87.9%) |
+
+Token counts use a `len / 4` estimate, not a real tokenizer, and 11 tables is a small schema. The gap grows with schema size, but treat these numbers as an illustration, not a general claim.
 
 ---
 
-## Testing and Security Audits
-
-The test suite covers unit logic, graph theory edge cases, and adversarial evasion vectors:
+## Testing
 
 ```bash
-uv run pytest -v
+uv run pytest        # runs in a few seconds
+uv run ruff check .
+uv run mypy src
 ```
 
-```
-tests/test_adversarial_qa.py ........................................... [ 46%]
-tests/test_dialects.py .....                                             [ 52%]
-tests/test_profiler.py .....                                             [ 57%]
-tests/test_safety.py ...................                                 [ 78%]
-tests/test_schema_graph.py .....                                         [ 83%]
-tests/test_server.py .........                                           [ 93%]
-tests/test_steiner_solver.py ......                                      [100%]
+The suite covers unit logic, graph edge cases, and adversarial SQL: multi-statement bypasses, subquery mutations, out-of-band exfiltration functions (`OPENROWSET`, `xp_cmdshell`), cartesian-join evasion, and cyclic topologies. See [SECURITY.md](SECURITY.md) for the threat model and how to report a bypass.
 
-============================= 92 passed in 2.03s ==============================
-```
+---
 
-- **43 Adversarial Attack Vectors:** Multi-statement bypasses, subquery mutations, OOB exfiltration (`OPENROWSET`, `xp_cmdshell`), Cartesian explosion bypasses, and cyclic topology tests.
-- **Linting & Type Safety:** 100% compliant with `ruff check` and `ruff format`.
+## Roadmap
+
+- Wire the SQL Server and PostgreSQL metadata adapters (already in `src/schema_compass/dialects/`) into the CLI as `--source mssql|postgres`
+- DuckDB as a schema source
+- Populate column sample values and null rates during extraction
+- Optional query execution behind the AST guard
 
 ---
 

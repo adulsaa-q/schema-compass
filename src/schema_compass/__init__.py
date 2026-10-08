@@ -1,3 +1,8 @@
-"""Enterprise BI MCP Server package."""
+"""Schema topology navigator and AST safety gateway, served over MCP."""
 
-__version__ = "0.1.0"
+from importlib.metadata import PackageNotFoundError, version
+
+try:
+    __version__ = version("schema-compass")
+except PackageNotFoundError:  # running from a bare source tree, not installed
+    __version__ = "0+unknown"

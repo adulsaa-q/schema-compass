@@ -1,0 +1,597 @@
+[
+  {
+    "name": "orders",
+    "schema_name": "dbo",
+    "row_count": 500000,
+    "role": "fact",
+    "columns": [
+      {
+        "name": "order_id",
+        "data_type": "BIGINT",
+        "is_pk": true,
+        "is_fk": false,
+        "nullable": true,
+        "null_rate": 0.0,
+        "sample_values": [],
+        "description": null
+      },
+      {
+        "name": "customer_id",
+        "data_type": "INT",
+        "is_pk": false,
+        "is_fk": true,
+        "nullable": true,
+        "null_rate": 0.0,
+        "sample_values": [],
+        "description": null
+      },
+      {
+        "name": "store_id",
+        "data_type": "INT",
+        "is_pk": false,
+        "is_fk": true,
+        "nullable": true,
+        "null_rate": 0.0,
+        "sample_values": [],
+        "description": null
+      },
+      {
+        "name": "promotion_id",
+        "data_type": "INT",
+        "is_pk": false,
+        "is_fk": true,
+        "nullable": true,
+        "null_rate": 0.0,
+        "sample_values": [],
+        "description": null
+      },
+      {
+        "name": "order_date",
+        "data_type": "DATE",
+        "is_pk": false,
+        "is_fk": false,
+        "nullable": true,
+        "null_rate": 0.0,
+        "sample_values": [],
+        "description": null
+      },
+      {
+        "name": "total_amount",
+        "data_type": "DECIMAL(12,2)",
+        "is_pk": false,
+        "is_fk": false,
+        "nullable": true,
+        "null_rate": 0.0,
+        "sample_values": [],
+        "description": null
+      }
+    ],
+    "relationships": [
+      {
+        "source_table": "orders",
+        "source_column": "customer_id",
+        "target_table": "customers",
+        "target_column": "customer_id",
+        "relationship_type": "declared_fk",
+        "weight": 1.0
+      },
+      {
+        "source_table": "orders",
+        "source_column": "store_id",
+        "target_table": "stores",
+        "target_column": "store_id",
+        "relationship_type": "declared_fk",
+        "weight": 1.0
+      },
+      {
+        "source_table": "orders",
+        "source_column": "promotion_id",
+        "target_table": "promotions",
+        "target_column": "promotion_id",
+        "relationship_type": "declared_fk",
+        "weight": 1.2
+      }
+    ],
+    "description": null
+  },
+  {
+    "name": "order_items",
+    "schema_name": "dbo",
+    "row_count": 1800000,
+    "role": "fact",
+    "columns": [
+      {
+        "name": "order_item_id",
+        "data_type": "BIGINT",
+        "is_pk": true,
+        "is_fk": false,
+        "nullable": true,
+        "null_rate": 0.0,
+        "sample_values": [],
+        "description": null
+      },
+      {
+        "name": "order_id",
+        "data_type": "BIGINT",
+        "is_pk": false,
+        "is_fk": true,
+        "nullable": true,
+        "null_rate": 0.0,
+        "sample_values": [],
+        "description": null
+      },
+      {
+        "name": "product_id",
+        "data_type": "INT",
+        "is_pk": false,
+        "is_fk": true,
+        "nullable": true,
+        "null_rate": 0.0,
+        "sample_values": [],
+        "description": null
+      },
+      {
+        "name": "quantity",
+        "data_type": "INT",
+        "is_pk": false,
+        "is_fk": false,
+        "nullable": true,
+        "null_rate": 0.0,
+        "sample_values": [],
+        "description": null
+      },
+      {
+        "name": "unit_price",
+        "data_type": "DECIMAL(10,2)",
+        "is_pk": false,
+        "is_fk": false,
+        "nullable": true,
+        "null_rate": 0.0,
+        "sample_values": [],
+        "description": null
+      }
+    ],
+    "relationships": [
+      {
+        "source_table": "order_items",
+        "source_column": "order_id",
+        "target_table": "orders",
+        "target_column": "order_id",
+        "relationship_type": "declared_fk",
+        "weight": 1.0
+      },
+      {
+        "source_table": "order_items",
+        "source_column": "product_id",
+        "target_table": "products",
+        "target_column": "product_id",
+        "relationship_type": "declared_fk",
+        "weight": 1.0
+      }
+    ],
+    "description": null
+  },
+  {
+    "name": "customers",
+    "schema_name": "dbo",
+    "row_count": 45000,
+    "role": "dimension",
+    "columns": [
+      {
+        "name": "customer_id",
+        "data_type": "INT",
+        "is_pk": true,
+        "is_fk": false,
+        "nullable": true,
+        "null_rate": 0.0,
+        "sample_values": [],
+        "description": null
+      },
+      {
+        "name": "region_id",
+        "data_type": "INT",
+        "is_pk": false,
+        "is_fk": true,
+        "nullable": true,
+        "null_rate": 0.0,
+        "sample_values": [],
+        "description": null
+      },
+      {
+        "name": "customer_name",
+        "data_type": "VARCHAR(100)",
+        "is_pk": false,
+        "is_fk": false,
+        "nullable": true,
+        "null_rate": 0.0,
+        "sample_values": [],
+        "description": null
+      },
+      {
+        "name": "segment",
+        "data_type": "VARCHAR(20)",
+        "is_pk": false,
+        "is_fk": false,
+        "nullable": true,
+        "null_rate": 0.0,
+        "sample_values": [],
+        "description": null
+      }
+    ],
+    "relationships": [
+      {
+        "source_table": "customers",
+        "source_column": "region_id",
+        "target_table": "regions",
+        "target_column": "region_id",
+        "relationship_type": "declared_fk",
+        "weight": 1.0
+      }
+    ],
+    "description": null
+  },
+  {
+    "name": "regions",
+    "schema_name": "dbo",
+    "row_count": 20,
+    "role": "dimension",
+    "columns": [
+      {
+        "name": "region_id",
+        "data_type": "INT",
+        "is_pk": true,
+        "is_fk": false,
+        "nullable": true,
+        "null_rate": 0.0,
+        "sample_values": [],
+        "description": null
+      },
+      {
+        "name": "country_id",
+        "data_type": "INT",
+        "is_pk": false,
+        "is_fk": true,
+        "nullable": true,
+        "null_rate": 0.0,
+        "sample_values": [],
+        "description": null
+      },
+      {
+        "name": "region_name",
+        "data_type": "VARCHAR(50)",
+        "is_pk": false,
+        "is_fk": false,
+        "nullable": true,
+        "null_rate": 0.0,
+        "sample_values": [],
+        "description": null
+      }
+    ],
+    "relationships": [
+      {
+        "source_table": "regions",
+        "source_column": "country_id",
+        "target_table": "countries",
+        "target_column": "country_id",
+        "relationship_type": "declared_fk",
+        "weight": 1.0
+      }
+    ],
+    "description": null
+  },
+  {
+    "name": "countries",
+    "schema_name": "dbo",
+    "row_count": 10,
+    "role": "dimension",
+    "columns": [
+      {
+        "name": "country_id",
+        "data_type": "INT",
+        "is_pk": true,
+        "is_fk": false,
+        "nullable": true,
+        "null_rate": 0.0,
+        "sample_values": [],
+        "description": null
+      },
+      {
+        "name": "country_name",
+        "data_type": "VARCHAR(50)",
+        "is_pk": false,
+        "is_fk": false,
+        "nullable": true,
+        "null_rate": 0.0,
+        "sample_values": [],
+        "description": null
+      }
+    ],
+    "relationships": [],
+    "description": null
+  },
+  {
+    "name": "stores",
+    "schema_name": "dbo",
+    "row_count": 150,
+    "role": "dimension",
+    "columns": [
+      {
+        "name": "store_id",
+        "data_type": "INT",
+        "is_pk": true,
+        "is_fk": false,
+        "nullable": true,
+        "null_rate": 0.0,
+        "sample_values": [],
+        "description": null
+      },
+      {
+        "name": "region_id",
+        "data_type": "INT",
+        "is_pk": false,
+        "is_fk": true,
+        "nullable": true,
+        "null_rate": 0.0,
+        "sample_values": [],
+        "description": null
+      },
+      {
+        "name": "store_name",
+        "data_type": "VARCHAR(100)",
+        "is_pk": false,
+        "is_fk": false,
+        "nullable": true,
+        "null_rate": 0.0,
+        "sample_values": [],
+        "description": null
+      }
+    ],
+    "relationships": [
+      {
+        "source_table": "stores",
+        "source_column": "region_id",
+        "target_table": "regions",
+        "target_column": "region_id",
+        "relationship_type": "declared_fk",
+        "weight": 1.0
+      }
+    ],
+    "description": null
+  },
+  {
+    "name": "products",
+    "schema_name": "dbo",
+    "row_count": 3500,
+    "role": "dimension",
+    "columns": [
+      {
+        "name": "product_id",
+        "data_type": "INT",
+        "is_pk": true,
+        "is_fk": false,
+        "nullable": true,
+        "null_rate": 0.0,
+        "sample_values": [],
+        "description": null
+      },
+      {
+        "name": "category_id",
+        "data_type": "INT",
+        "is_pk": false,
+        "is_fk": true,
+        "nullable": true,
+        "null_rate": 0.0,
+        "sample_values": [],
+        "description": null
+      },
+      {
+        "name": "supplier_id",
+        "data_type": "INT",
+        "is_pk": false,
+        "is_fk": true,
+        "nullable": true,
+        "null_rate": 0.0,
+        "sample_values": [],
+        "description": null
+      },
+      {
+        "name": "product_name",
+        "data_type": "VARCHAR(150)",
+        "is_pk": false,
+        "is_fk": false,
+        "nullable": true,
+        "null_rate": 0.0,
+        "sample_values": [],
+        "description": null
+      },
+      {
+        "name": "price",
+        "data_type": "DECIMAL(10,2)",
+        "is_pk": false,
+        "is_fk": false,
+        "nullable": true,
+        "null_rate": 0.0,
+        "sample_values": [],
+        "description": null
+      }
+    ],
+    "relationships": [
+      {
+        "source_table": "products",
+        "source_column": "category_id",
+        "target_table": "categories",
+        "target_column": "category_id",
+        "relationship_type": "declared_fk",
+        "weight": 1.0
+      },
+      {
+        "source_table": "products",
+        "source_column": "supplier_id",
+        "target_table": "suppliers",
+        "target_column": "supplier_id",
+        "relationship_type": "declared_fk",
+        "weight": 1.0
+      }
+    ],
+    "description": null
+  },
+  {
+    "name": "categories",
+    "schema_name": "dbo",
+    "row_count": 40,
+    "role": "dimension",
+    "columns": [
+      {
+        "name": "category_id",
+        "data_type": "INT",
+        "is_pk": true,
+        "is_fk": false,
+        "nullable": true,
+        "null_rate": 0.0,
+        "sample_values": [],
+        "description": null
+      },
+      {
+        "name": "category_name",
+        "data_type": "VARCHAR(50)",
+        "is_pk": false,
+        "is_fk": false,
+        "nullable": true,
+        "null_rate": 0.0,
+        "sample_values": [],
+        "description": null
+      }
+    ],
+    "relationships": [],
+    "description": null
+  },
+  {
+    "name": "suppliers",
+    "schema_name": "dbo",
+    "row_count": 80,
+    "role": "dimension",
+    "columns": [
+      {
+        "name": "supplier_id",
+        "data_type": "INT",
+        "is_pk": true,
+        "is_fk": false,
+        "nullable": true,
+        "null_rate": 0.0,
+        "sample_values": [],
+        "description": null
+      },
+      {
+        "name": "country_id",
+        "data_type": "INT",
+        "is_pk": false,
+        "is_fk": true,
+        "nullable": true,
+        "null_rate": 0.0,
+        "sample_values": [],
+        "description": null
+      },
+      {
+        "name": "supplier_name",
+        "data_type": "VARCHAR(100)",
+        "is_pk": false,
+        "is_fk": false,
+        "nullable": true,
+        "null_rate": 0.0,
+        "sample_values": [],
+        "description": null
+      }
+    ],
+    "relationships": [
+      {
+        "source_table": "suppliers",
+        "source_column": "country_id",
+        "target_table": "countries",
+        "target_column": "country_id",
+        "relationship_type": "declared_fk",
+        "weight": 1.0
+      }
+    ],
+    "description": null
+  },
+  {
+    "name": "promotions",
+    "schema_name": "dbo",
+    "row_count": 25,
+    "role": "dimension",
+    "columns": [
+      {
+        "name": "promotion_id",
+        "data_type": "INT",
+        "is_pk": true,
+        "is_fk": false,
+        "nullable": true,
+        "null_rate": 0.0,
+        "sample_values": [],
+        "description": null
+      },
+      {
+        "name": "promo_code",
+        "data_type": "VARCHAR(20)",
+        "is_pk": false,
+        "is_fk": false,
+        "nullable": true,
+        "null_rate": 0.0,
+        "sample_values": [],
+        "description": null
+      },
+      {
+        "name": "discount_pct",
+        "data_type": "DECIMAL(5,2)",
+        "is_pk": false,
+        "is_fk": false,
+        "nullable": true,
+        "null_rate": 0.0,
+        "sample_values": [],
+        "description": null
+      }
+    ],
+    "relationships": [],
+    "description": null
+  },
+  {
+    "name": "audit_logs",
+    "schema_name": "sys",
+    "row_count": 100000,
+    "role": "fact",
+    "columns": [
+      {
+        "name": "log_id",
+        "data_type": "BIGINT",
+        "is_pk": true,
+        "is_fk": false,
+        "nullable": true,
+        "null_rate": 0.0,
+        "sample_values": [],
+        "description": null
+      },
+      {
+        "name": "action",
+        "data_type": "VARCHAR(50)",
+        "is_pk": false,
+        "is_fk": false,
+        "nullable": true,
+        "null_rate": 0.0,
+        "sample_values": [],
+        "description": null
+      },
+      {
+        "name": "timestamp",
+        "data_type": "DATETIME",
+        "is_pk": false,
+        "is_fk": false,
+        "nullable": true,
+        "null_rate": 0.0,
+        "sample_values": [],
+        "description": null
+      }
+    ],
+    "relationships": [],
+    "description": null
+  }
+]

@@ -35,6 +35,9 @@ jobs:
       - name: Ruff Format Check
         run: uv run ruff format --check .
 
+      - name: Mypy (strict)
+        run: uv run mypy src
+
   test:
     name: Test (${{ matrix.os }} - Python ${{ matrix.python-version }})
     runs-on: ${{ matrix.os }}

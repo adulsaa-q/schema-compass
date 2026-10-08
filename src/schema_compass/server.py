@@ -3,6 +3,7 @@ import logging
 from mcp.server.mcpserver import MCPServer
 from sqlglot.errors import ParseError
 
+from schema_compass import __version__
 from schema_compass.graph.schema_graph import SchemaGraph
 from schema_compass.graph.steiner_solver import SteinerJoinSolver
 from schema_compass.models import DisconnectedGraphError, TableContract
@@ -18,6 +19,7 @@ def create_server(contracts: list[TableContract] | None = None) -> MCPServer:
     server = MCPServer(
         name="schema-compass",
         description="Database topology navigator and AST safety gateway",
+        version=__version__,
     )
 
     loaded_contracts = contracts or []
@@ -199,7 +201,7 @@ def load_contracts_from_source(source_type: str, path: str | None = None) -> lis
             conn.close()
 
     # default fallback to sample schema fixture
-    from tests.fixtures.sample_schema import SAMPLE_CONTRACTS
+    from schema_compass.sample_schema import SAMPLE_CONTRACTS
 
     return SAMPLE_CONTRACTS
 

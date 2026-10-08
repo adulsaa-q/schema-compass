@@ -1,4 +1,5 @@
 import logging
+from collections.abc import Iterable
 
 import sqlglot
 from sqlglot import exp
@@ -68,6 +69,151 @@ PROHIBITED_FUNCTIONS = {
 }
 
 
+# Functions that sqlglot does not model as typed nodes but that are ordinary, side-effect free
+# SQL. Anything else that parses as an unknown ("anonymous") function is rejected, so a new
+# dangerous function is blocked by default instead of passing until someone adds it to a deny-list.
+# Typed functions (COUNT, COALESCE, CAST, ...) are standard SQL and are allowed, except the nodes below.
+ALLOWED_ANONYMOUS_FUNCTIONS = frozenset(
+    {
+        "age",
+        "binary_checksum",
+        "bit_and",
+        "bit_count",
+        "bit_or",
+        "bit_xor",
+        "cardinality",
+        "checksum",
+        "checksum_agg",
+        "choose",
+        "count_big",
+        "crc32",
+        "datalength",
+        "date_format",
+        "date_part",
+        "date_sub",
+        "dateadd",
+        "datename",
+        "datepart",
+        "datetime",
+        "datetime2fromparts",
+        "difference",
+        "eomonth",
+        "every",
+        "format_date",
+        "from_unixtime",
+        "getdate",
+        "hash",
+        "if_null",
+        "isdate",
+        "isjson",
+        "isnull",
+        "isnumeric",
+        "json_agg",
+        "json_array",
+        "json_array_elements",
+        "json_array_length",
+        "json_build_object",
+        "json_each",
+        "json_group_array",
+        "json_group_object",
+        "json_query",
+        "json_tree",
+        "json_valid",
+        "json_value",
+        "jsonb_agg",
+        "jsonb_array_elements",
+        "jsonb_extract_path",
+        "julianday",
+        "likely",
+        "list_agg",
+        "listagg",
+        "make_date",
+        "make_timestamp",
+        "nchar",
+        "newid",
+        "now",
+        "nullifzero",
+        "octet_length",
+        "openjson",
+        "parse",
+        "patindex",
+        "printf",
+        "regexp_matches",
+        "row_to_json",
+        "sha256",
+        "stdevp",
+        "strftime",
+        "string_split",
+        "sum_if",
+        "sysdate",
+        "sysdatetime",
+        "time",
+        "timestampadd",
+        "to_date",
+        "to_decimal",
+        "to_json",
+        "to_jsonb",
+        "to_timestamp",
+        "to_varchar",
+        "total",
+        "trunc",
+        "try_parse",
+        "try_to_date",
+        "try_to_number",
+        "unix_timestamp",
+        "unlikely",
+        "var",
+        "weekday",
+        "zeroifnull",
+    }
+)
+
+# Typed sqlglot nodes that read files, call the network, or call hosted models.
+PROHIBITED_FUNCTION_NODES = (
+    exp.ReadCSV,
+    exp.ReadParquet,
+    exp.ToFile,
+    exp.NetFunc,
+    exp.AIGenerate,
+    exp.GenerateEmbedding,
+    exp.GenerateText,
+    exp.GenerateBool,
+    exp.GenerateInt,
+    exp.GenerateDouble,
+)
+
+# Never unlocked by `extra_allowed_functions`: file/OS access, sleeps, and functions that
+# change server state (sequences, advisory locks, notifications, large objects).
+HARD_DENIED_FUNCTIONS = PROHIBITED_FUNCTIONS | {
+    "nextval",
+    "setval",
+    "lastval",
+    "pg_advisory_lock",
+    "pg_advisory_xact_lock",
+    "pg_try_advisory_lock",
+    "pg_notify",
+    "pg_ls_dir",
+    "pg_stat_file",
+    "lo_import",
+    "lo_export",
+    "lo_create",
+    "lo_unlink",
+    "query_to_xml",
+    "load_file",
+    "read_csv",
+    "read_parquet",
+}
+HARD_DENIED_PREFIXES = ("xp_", "sp_oa", "lo_")
+
+# Table hints that never take locks beyond a normal read.
+ALLOWED_TABLE_HINTS = frozenset(
+    {"nolock", "readuncommitted", "readcommitted", "index", "forceseek", "forcescan", "noexpand"}
+)
+
+SYSTEM_SCHEMAS = frozenset({"sys", "pg_catalog", "pg_toast", "mysql", "performance_schema"})
+SYSTEM_DATABASES = frozenset({"master", "msdb", "tempdb", "model"})
+
+
 import re
 
 PII_COLUMN_PATTERNS = re.compile(
@@ -81,10 +227,35 @@ SENSITIVE_TABLE_PATTERNS = re.compile(
 )
 
 
+SYSTEM_TABLE_PATTERN = re.compile(
+    r"^(pg_|sqlite_)|^sys(databases|logins|objects|columns|users|processes|servers|configures"
+    r"|comments|xlogins|indexes|types)$",
+    re.IGNORECASE,
+)
+
 MAX_SQL_LENGTH = 100_000  # 100 KB payload limit to prevent parser memory bombs
 
 
 class ASTGuard:
+    """Read-only SQL gatekeeper.
+
+    Policy is fixed per instance:
+      extra_allowed_functions: function names to allow beyond the built-in allowlist
+        (e.g. your own UDFs). Hard-denied functions can never be unlocked this way.
+      allow_recursive_cte: permit recursive CTEs (off by default: they can run unbounded).
+      allow_system_catalogs: permit reads of sys.*, pg_catalog, sqlite_master and similar.
+    """
+
+    def __init__(
+        self,
+        extra_allowed_functions: Iterable[str] = (),
+        allow_recursive_cte: bool = False,
+        allow_system_catalogs: bool = False,
+    ) -> None:
+        self.extra_allowed_functions = frozenset(f.lower() for f in extra_allowed_functions)
+        self.allow_recursive_cte = allow_recursive_cte
+        self.allow_system_catalogs = allow_system_catalogs
+
     def validate(
         self,
         sql: str,
@@ -113,7 +284,7 @@ class ASTGuard:
             logger.warning("SQL parse error for query: %s", e)
             raise ASTSecurityViolation(f"SQL parse error: {e}") from e
 
-        valid_stmts = [s for s in statements if s is not None]
+        valid_stmts = [s for s in statements if s is not None and not isinstance(s, exp.Semicolon)]
         if len(valid_stmts) != 1:
             logger.warning("Multi-statement attempt detected: count=%d", len(valid_stmts))
             raise ASTSecurityViolation(
@@ -137,18 +308,11 @@ class ASTGuard:
                     f"Prohibited node detected in AST: {prohibited.__name__} ({found.sql()[:50]})"
                 )
 
-        # scan for dangerous functions / procedures / remote providers
-        for func in stmt.find_all(exp.Func, exp.Anonymous):
-            func_name = (func.name or func.sql_name() or "").lower()
-            if func_name in PROHIBITED_FUNCTIONS or func_name.startswith(("xp_", "sp_oa")):
-                raise ASTSecurityViolation(
-                    f"Prohibited function or procedure detected: {func_name}"
-                )
-
-        for table in stmt.find_all(exp.Table):
-            t_name = (table.name or "").lower()
-            if t_name in PROHIBITED_FUNCTIONS or t_name.startswith(("xp_", "sp_oa")):
-                raise ASTSecurityViolation(f"Prohibited table function detected: {t_name}")
+        self._check_functions(stmt)
+        self._check_tables(stmt)
+        self._check_query_options(stmt)
+        if not self.allow_recursive_cte:
+            self._check_no_recursion(stmt)
 
         # Column-Level DLP and PII Protection
         if block_unaggregated_pii or blocked_columns:
@@ -244,10 +408,19 @@ class ASTGuard:
                     )
 
                     # Explicit CROSS JOIN without condition is always a Cartesian violation
-                    if is_cross and not has_on_or_using:
+                    if (
+                        is_cross
+                        and not has_on_or_using
+                        and not self._is_correlated(select_expr, join)
+                    ):
                         raise ASTSecurityViolation(
                             f"Unconstrained Cartesian join detected: {join.sql()}. CROSS JOIN without condition blocked."
                         )
+
+                    # A join whose right side reads an earlier table (json_each(t.j), LATERAL,
+                    # CROSS APPLY) is correlated per row, not a Cartesian product.
+                    if not has_on_or_using and self._is_correlated(select_expr, join):
+                        continue
 
                     # Implicit comma join or unconstrained join must have equijoin connecting to another table
                     if not has_on_or_using:
@@ -263,6 +436,92 @@ class ASTGuard:
                             )
 
         return stmt
+
+    def _check_functions(self, stmt: exp.Query) -> None:
+        for node in stmt.find_all(exp.Func):
+            if isinstance(node, PROHIBITED_FUNCTION_NODES):
+                raise ASTSecurityViolation(
+                    f"Prohibited function detected: {node.sql_name().lower()}"
+                )
+            if not isinstance(node, exp.Anonymous) or isinstance(node.parent, exp.WithTableHint):
+                continue  # typed = standard SQL; hint items are vetted in _check_tables
+            name = node.name.lower()
+            if name in HARD_DENIED_FUNCTIONS or name.startswith(HARD_DENIED_PREFIXES):
+                raise ASTSecurityViolation(f"Prohibited function or procedure detected: {name}")
+            if name not in ALLOWED_ANONYMOUS_FUNCTIONS and name not in self.extra_allowed_functions:
+                raise ASTSecurityViolation(
+                    f"Function '{name}' is not on the allowlist. "
+                    "Allow it explicitly (extra_allowed_functions) if it is safe."
+                )
+
+    def _check_tables(self, stmt: exp.Query) -> None:
+        cte_names = {cte.alias_or_name.lower() for cte in stmt.find_all(exp.CTE)}
+        for table in stmt.find_all(exp.Table):
+            name = (table.name or "").lower()
+            if name in HARD_DENIED_FUNCTIONS or name.startswith(HARD_DENIED_PREFIXES):
+                raise ASTSecurityViolation(f"Prohibited table function detected: {name}")
+
+            for hint in table.args.get("hints") or []:
+                for item in getattr(hint, "expressions", None) or []:
+                    hint_name = (item.name or "").lower()
+                    if hint_name not in ALLOWED_TABLE_HINTS:
+                        raise ASTSecurityViolation(
+                            f"Table hint '{hint_name.upper()}' is blocked: it can take locks. "
+                            "Only NOLOCK/READUNCOMMITTED and plain index hints are allowed."
+                        )
+
+            if self.allow_system_catalogs or (name in cte_names and not table.db):
+                continue
+            schema = (table.db or "").lower()
+            database = (table.catalog or "").lower()
+            if (
+                schema in SYSTEM_SCHEMAS
+                or database in SYSTEM_DATABASES
+                or SYSTEM_TABLE_PATTERN.search(name)
+            ):
+                raise ASTSecurityViolation(
+                    f"Access to system catalog '{table.sql()[:60]}' is blocked "
+                    "(it can expose credentials and server configuration)."
+                )
+
+    @staticmethod
+    def _is_correlated(select: exp.Select, join: exp.Join) -> bool:
+        """True when the joined expression references a table that appears earlier in the FROM."""
+        from_node = select.args.get("from") or select.args.get("from_")
+        earlier = [from_node.this] if from_node is not None and from_node.this else []
+        for other in select.args.get("joins") or []:
+            if other is join:
+                break
+            earlier.append(other.this)
+        names = {e.alias_or_name.lower() for e in earlier if e is not None and e.alias_or_name}
+        target = join.this
+        if (
+            target is None
+            or isinstance(target, exp.Table)
+            and isinstance(target.this, exp.Identifier)
+        ):
+            return False  # a plain named table has nothing to correlate with
+        return any(col.table.lower() in names for col in target.find_all(exp.Column) if col.table)
+
+    def _check_query_options(self, stmt: exp.Query) -> None:
+        for option in stmt.find_all(exp.QueryOption):
+            if (option.name or "").lower() == "maxrecursion" and str(option.expression) == "0":
+                raise ASTSecurityViolation("OPTION (MAXRECURSION 0) removes the recursion limit.")
+
+    def _check_no_recursion(self, stmt: exp.Query) -> None:
+        for with_ in stmt.find_all(exp.With):
+            if with_.args.get("recursive"):
+                raise ASTSecurityViolation(
+                    "Recursive CTEs are blocked because they can run without bound."
+                )
+            for cte in with_.expressions:
+                own_name = cte.alias_or_name.lower()
+                if any(
+                    t.name.lower() == own_name and not t.db for t in cte.this.find_all(exp.Table)
+                ):
+                    raise ASTSecurityViolation(
+                        f"Recursive CTE '{own_name}' is blocked because it can run without bound."
+                    )
 
     def rewrite(
         self,

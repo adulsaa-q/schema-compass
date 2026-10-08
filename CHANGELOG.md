@@ -12,6 +12,23 @@ All notable changes to this project are documented here. Format follows
   ranked by how many words match; an exact table-name match ranks first. Found by running the
   server against the public Chinook database.
 
+### Security
+- SQL guard now uses a function **allowlist**: unknown (non-standard) functions are rejected instead of
+  passing unless named in a deny-list. This closed bypasses found by probing with real dialect syntax:
+  `pg_ls_dir`, `lo_import`, `query_to_xml`, `nextval`, `pg_advisory_lock`, `zeroblob`/`randomblob`,
+  `LOAD_FILE`, DuckDB `read_csv`/`read_parquet`, and SQL Server `fn_*`/user-defined table functions.
+- Reads of system catalogs (`sys.*`, `pg_catalog`, `pg_shadow`, `sqlite_master`, `mysql.*`, `master..`)
+  are blocked by default.
+- Table hints that take locks (`TABLOCKX`, `UPDLOCK`, `HOLDLOCK`, ...) are rejected; only
+  `NOLOCK`/`READUNCOMMITTED`/index hints pass. `OPTION (MAXRECURSION 0)` and recursive CTEs are blocked.
+- New opt-ins: `ASTGuard(extra_allowed_functions=, allow_recursive_cte=, allow_system_catalogs=)` and CLI flags
+  `--allow-function`, `--allow-recursive-cte`, `--allow-system-catalogs`. Hard-denied functions cannot be unlocked.
+- SECURITY.md now states what the guard does not protect against.
+
+### Fixed (guard false positives)
+- `SELECT ...; --` (trailing semicolon plus comment) was rejected as multi-statement.
+- Correlated joins to table functions (`FROM t, json_each(t.j)`, `CROSS APPLY`) were rejected as Cartesian.
+
 ## [0.1.1] - 2026-10-08
 
 ### Fixed

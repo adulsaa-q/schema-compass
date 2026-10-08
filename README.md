@@ -38,7 +38,8 @@ Schema-Compass features **Offline Schema Mode**:
 ### 4. Deterministic AST Safety Gateway
 Regex filters fail against obfuscated SQL and subquery attacks. Schema-Compass parses every query using `sqlglot` Abstract Syntax Tree (AST) validation:
 - **Strict Read-Only Enforcement:** Blocks all DDL/DML operations (`INSERT`, `UPDATE`, `DELETE`, `DROP`, `ALTER`, `TRUNCATE`, `MERGE`, `EXECUTE`).
-- **Dangerous Procedure Blocklist:** Blocks remote execution and exfiltration functions (`xp_cmdshell`, `sp_OACreate`, `OPENROWSET`, `OPENDATASOURCE`, `OPENQUERY`, `load_extension`, `pg_read_file`).
+- **Function Allowlist:** Unknown functions are rejected rather than checked against a list of known-bad names, so `pg_ls_dir`, `lo_import`, `zeroblob`, `xp_cmdshell`, `OPENROWSET` and the like are blocked by default. Add your own with `--allow-function NAME`.
+- **System Catalog and Lock Protection:** Blocks reads of `sys.*`, `pg_catalog`, `sqlite_master` and similar, lock-taking table hints (`TABLOCKX`, `UPDLOCK`), recursive CTEs and `MAXRECURSION 0`. See [SECURITY.md](SECURITY.md) for the opt-outs and the known limits.
 - **Cartesian Join Detection:** Flags unconstrained comma joins and cross joins even when disguised behind subqueries or trivial `WHERE 1 = 1` clauses.
 - **Non-Breaking Table Hints:** Injects `WITH (NOLOCK)` on physical SQL Server tables while automatically filtering out Table-Valued Functions (`STRING_SPLIT`, `OPENJSON`) and table variables (`@var`).
 - **Deterministic Row Limits:** Enforces positive row limits (`TOP 100` / `LIMIT 100`) while preserving smaller user limits (`TOP (5)` or `FETCH NEXT 5 ROWS`).

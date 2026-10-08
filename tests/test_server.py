@@ -121,3 +121,31 @@ def test_load_contracts_from_sqlite(tmp_path) -> None:
     contracts = load_contracts_from_source("sqlite", str(db_path))
     assert len(contracts) == 1
     assert contracts[0].name == "products"
+
+
+@pytest.mark.anyio
+async def test_server_uses_the_guard_it_is_given() -> None:
+    from schema_compass.safety.ast_guard import ASTGuard
+
+    strict = create_server(contracts=SAMPLE_CONTRACTS)
+    open_ = create_server(
+        contracts=SAMPLE_CONTRACTS, guard=ASTGuard(extra_allowed_functions={"my_udf"})
+    )
+    sql = {"sql": "SELECT my_udf(order_id) FROM orders", "dialect": "postgres"}
+    assert (
+        "not on the allowlist"
+        in (await strict.call_tool("execute_safe_query", sql)).content[0].text
+    )
+    assert (
+        (await open_.call_tool("execute_safe_query", sql)).content[0].text.startswith("Validated")
+    )
+
+
+def test_cli_flags_build_the_guard() -> None:
+    from schema_compass.server import build_guard
+
+    guard = build_guard(
+        allow_functions=["MY_UDF", "other"], allow_recursive_cte=True, allow_system_catalogs=True
+    )
+    assert guard.extra_allowed_functions == {"my_udf", "other"}
+    assert guard.allow_recursive_cte and guard.allow_system_catalogs

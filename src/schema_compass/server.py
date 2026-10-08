@@ -1,4 +1,5 @@
 import logging
+from collections.abc import Iterable
 
 from mcp.server.mcpserver import MCPServer
 from sqlglot.errors import ParseError
@@ -16,7 +17,9 @@ from schema_compass.search import search_contracts
 logger = logging.getLogger(__name__)
 
 
-def create_server(contracts: list[TableContract] | None = None) -> MCPServer:
+def create_server(
+    contracts: list[TableContract] | None = None, guard: ASTGuard | None = None
+) -> MCPServer:
     server = MCPServer(
         name="schema-compass",
         description="Database topology navigator and AST safety gateway",
@@ -33,7 +36,7 @@ def create_server(contracts: list[TableContract] | None = None) -> MCPServer:
         graph.load_contracts(loaded_contracts)
 
     solver = SteinerJoinSolver(graph)
-    guard = ASTGuard()
+    guard = guard or ASTGuard()
 
     @server.tool(
         name="search_catalog",
@@ -187,6 +190,18 @@ def load_contracts_from_source(source_type: str, path: str | None = None) -> lis
     return SAMPLE_CONTRACTS
 
 
+def build_guard(
+    allow_functions: Iterable[str] = (),
+    allow_recursive_cte: bool = False,
+    allow_system_catalogs: bool = False,
+) -> ASTGuard:
+    return ASTGuard(
+        extra_allowed_functions=allow_functions,
+        allow_recursive_cte=allow_recursive_cte,
+        allow_system_catalogs=allow_system_catalogs,
+    )
+
+
 def main() -> None:
     import argparse
     import os
@@ -203,10 +218,28 @@ def main() -> None:
         default=os.getenv("SCHEMA_COMPASS_PATH"),
         help="Path to sqlite .db file or pre-exported schema .json file",
     )
+    parser.add_argument(
+        "--allow-function",
+        action="append",
+        default=[],
+        metavar="NAME",
+        help="Allow an extra SQL function (e.g. your own UDF); repeatable",
+    )
+    parser.add_argument(
+        "--allow-recursive-cte",
+        action="store_true",
+        help="Allow recursive CTEs (blocked by default: they can run without bound)",
+    )
+    parser.add_argument(
+        "--allow-system-catalogs",
+        action="store_true",
+        help="Allow reads of sys.*, pg_catalog, sqlite_master and similar (blocked by default)",
+    )
     args = parser.parse_args()
 
     contracts = load_contracts_from_source(args.source, args.path)
-    server = create_server(contracts=contracts)
+    guard = build_guard(args.allow_function, args.allow_recursive_cte, args.allow_system_catalogs)
+    server = create_server(contracts=contracts, guard=guard)
     server.run(transport="stdio")
 
 

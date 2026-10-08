@@ -402,7 +402,8 @@ async def test_every_join_tree_the_server_builds_passes_its_own_guard(guard: AST
             text = reply.content[0].text
             if "FROM" not in text:
                 continue  # tables with no join path have no tree to check
-            sql = "SELECT * " + text.replace("```sql", "").replace("```", "").strip()
+            sql_part = text.split("\n\nWarning")[0]
+            sql = "SELECT * " + sql_part.replace("```sql", "").replace("```", "").strip()
             guard.validate(sql, dialect="tsql")
             checked += 1
     assert checked > 10

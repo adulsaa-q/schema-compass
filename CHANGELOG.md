@@ -5,6 +5,14 @@ All notable changes to this project are documented here. Format follows
 
 ## [Unreleased]
 
+### Added
+- `get_join_tree` now warns when a join walks from the "one" side to the "many" side of a key, for
+  example `Track` to `PlaylistTrack`. Those joins repeat the rows joined so far, so SUM/COUNT over
+  them overcounts without any error. The warning names the tables whose values repeat and points at
+  aggregating first or `COUNT(DISTINCT ...)`. Several such branches in one query are called out as
+  multiplying each other. Joins that only follow foreign keys toward the parent tables get no warning.
+  Each `JoinStep` carries a `cardinality` (`many_to_one`, `one_to_many` or `unknown`).
+
 ### Fixed
 - Table roles were wrong whenever a dimension had a price and several foreign keys. On the Chinook
   sample `Track` was labelled a fact (it has `UnitPrice` and three foreign keys) while `Invoice` was a

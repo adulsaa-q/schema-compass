@@ -69,7 +69,11 @@ def create_server(
             return "At least 2 tables are required to calculate a join tree."
         try:
             tree = solver.solve(tables)
-            return tree.to_sql_from_clause()
+            text = tree.to_sql_from_clause()
+            warnings = tree.fan_out_warnings()
+            if warnings:
+                text += "\n\nWarning: row multiplication\n" + "\n".join(f"- {w}" for w in warnings)
+            return text
         except (DisconnectedGraphError, KeyError, ValueError) as e:
             return f"Failed to compute join tree: {e}"
 

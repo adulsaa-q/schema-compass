@@ -1,5 +1,7 @@
 """Steiner Minimal Join Tree solver for multi-table relational joins."""
 
+from typing import Literal
+
 import networkx as nx
 from networkx.algorithms.approximation import steiner_tree
 
@@ -76,12 +78,14 @@ class SteinerJoinSolver:
                 rel_from = edge_meta.get("from_col")
                 rel_to = edge_meta.get("to_col")
 
+            cardinality: Literal["many_to_one", "one_to_many", "unknown"] = "unknown"
             contract_u = self.schema_graph.get_contract(u)
             u_is_source = False
             if contract_u:
                 for rel in contract_u.relationships:
                     if rel.target_table == v:
                         u_is_source = True
+                        cardinality = "many_to_one"
                         rel_from = rel.source_column
                         rel_to = rel.target_column
                         break
@@ -91,6 +95,7 @@ class SteinerJoinSolver:
                 if contract_v:
                     for rel in contract_v.relationships:
                         if rel.target_table == u:
+                            cardinality = "one_to_many"
                             rel_from = rel.target_column
                             rel_to = rel.source_column
                             break
@@ -102,6 +107,7 @@ class SteinerJoinSolver:
                     to_table=v,
                     to_column=rel_to or "id",
                     join_type="JOIN",
+                    cardinality=cardinality,
                 )
             )
 

@@ -13,6 +13,13 @@ All notable changes to this project are documented here. Format follows
   multiplying each other. Joins that only follow foreign keys toward the parent tables get no warning.
   Each `JoinStep` carries a `cardinality` (`many_to_one`, `one_to_many` or `unknown`).
 
+### Changed
+- README now reports an end-to-end test with an agent (`evals/eval_agent_sql.py`) and drops claims it did
+  not support. With Claude Code writing SQL for six Chinook questions, answers were equally correct with or
+  without schema-compass. It made no difference on an 11-table schema, and cost about 50 times less
+  per question on a 976-table schema, where the full DDL alone is about 165,000 tokens. The 976-table
+  database is synthetic (`evals/make_large_schema.py`), and the full-DDL side was measured on one question.
+
 ### Fixed
 - Table roles were wrong whenever a dimension had a price and several foreign keys. On the Chinook
   sample `Track` was labelled a fact (it has `UnitPrice` and three foreign keys) while `Invoice` was a

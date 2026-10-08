@@ -13,15 +13,15 @@ An open-source Model Context Protocol (MCP) server that gives AI coding agents (
 
 ## Why Schema-Compass Exists
 
-### 1. Schema Overload (50,000+ Tokens to Under 200 Tokens)
-Enterprise databases with hundreds of tables exceed LLM context windows, leading to context truncation, high API costs, and severe hallucination rates. 
+### 1. Schema Overload
+A schema with hundreds of tables does not fit comfortably in a model's context, and sending it with every question is slow and expensive. In one test, the DDL of a 976-table database was about 165,000 tokens (see [Benchmarks](#benchmarks)).
 
 Schema-Compass implements **Minimal Effective Context (MEC)**:
-- Instead of dumping raw DDLs, it serves compact table contracts under 200 tokens per table.
+- Instead of dumping raw DDLs, the agent searches the catalog and asks for compact contracts of only the tables it needs.
 - Contracts include column types, keys, and inlined foreign key relationships (null rates and sample values are rendered when present, but the current extractors do not fill them yet) (e.g. `- customer_id: INT (FK -> customers.customer_id)`).
 
-### 2. Hallucinated Joins and Cartesian Disasters
-When database schemas lack foreign keys or rely on implicit naming conventions, AI agents frequently hallucinate join keys or write accidental Cartesian products.
+### 2. Wrong Joins and Cartesian Products
+When a schema lacks foreign keys or relies on naming conventions, an agent can guess join keys wrong or write an accidental Cartesian product. In the agent test below the model joined the Chinook tables correctly either way, so this is a safeguard I have not seen fail on that schema.
 
 Schema-Compass models your relational schema as an edge-weighted graph:
 - Computes multi-table join paths using the **Kou-Markowsky-Berman (KMB) Minimum Steiner Tree 2-approximation algorithm**.
@@ -221,7 +221,38 @@ uv run python evals/eval_join_benchmark.py
 | 5-hop join tree | ~3.2 ms |
 | Prompt size, raw DDL vs. compact contract | 511 vs. 62 tokens (-87.9%) |
 
-Token counts use a `len / 4` estimate, not a real tokenizer, and 11 tables is a small schema. The gap grows with schema size, but treat these numbers as an illustration, not a general claim.
+Token counts here use a `len / 4` estimate, not a real tokenizer. That estimate runs low for SQL: it gave about 75,000 tokens for the 976-table DDL below, and the model billed about 165,000. Treat these numbers as an illustration.
+
+### With an agent
+
+`evals/eval_agent_sql.py` asks Claude Code (Sonnet) to write SQL for six questions on the Chinook database, runs each answer read-only, and compares it with a reference query. One setup gives the agent only the schema-compass tools. The other puts the full DDL in the prompt. One of the six questions is a trap where joining invoices to invoice lines double-counts the invoice totals.
+
+| Schema | Setup | Correct | Tokens per question | Cost per question |
+| :--- | :--- | :--- | :--- | :--- |
+| 11 tables (Chinook) | schema-compass | 6/6 | about 15,700 | $0.014 |
+| 11 tables (Chinook) | full DDL | 6/6 | about 5,800 | $0.014 |
+| 976 tables | schema-compass | 6/6 | about 15,700 | $0.013 |
+| 976 tables | full DDL | 1/1 | 164,841 | $0.65 |
+
+What this shows:
+
+- On a small schema there is no gain. The whole DDL is about 5,800 tokens, so the model just reads it, and the cost is the same.
+- With schema-compass the cost did not grow with the schema, because the agent only reads the tables it asks about. The full DDL of 976 tables took 165,000 tokens, close to a 200,000 token window.
+- Accuracy was the same in every run I made. The benefit is cost and room in the context window, not better SQL.
+
+What it does not show:
+
+- The extra 965 tables are synthetic: random names, columns and keys, empty, plus five look-alikes such as `invoice_archive_2015` (`evals/make_large_schema.py`). A real warehouse is messier.
+- The full-DDL setup ran on one question at the large size because it costs $0.65 each.
+- One model, one run per question. A rerun can differ.
+- With prompt caching, repeat questions on a full DDL cost much less after the first. The DDL still takes up the context window. I did not measure that case.
+
+```bash
+BENCH_DB=Chinook_Sqlite.sqlite uv run python evals/eval_agent_sql.py all A_mcp,B_ddl
+uv run python evals/make_large_schema.py Chinook_Sqlite.sqlite large.sqlite
+```
+
+Every run is billed to your API key. `Chinook_Sqlite.sqlite` comes from the [chinook-database](https://github.com/lerocha/chinook-database) releases.
 
 ---
 

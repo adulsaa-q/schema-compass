@@ -3,7 +3,12 @@
 All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [SemVer](https://semver.org/).
 
-## [Unreleased]
+## [0.2.0] - 2026-10-08
+
+**Breaking:** the SQL guard now rejects anything it does not recognise as safe. Queries that use
+functions outside the allowlist, system catalogs, recursive CTEs, lock hints, range-only joins or
+`ON` conditions that do not tie tables together are blocked. See the Security section below and
+`SECURITY.md` for the opt-outs.
 
 ### Fixed
 - `search_catalog` returned nothing for any multi-word query ("invoice total", "customer email")

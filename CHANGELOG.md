@@ -3,7 +3,7 @@
 All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [SemVer](https://semver.org/).
 
-## [Unreleased]
+## [0.2.1] - 2026-10-08
 
 ### Added
 - `get_join_tree` now warns when a join walks from the "one" side to the "many" side of a key, for

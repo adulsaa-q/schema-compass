@@ -334,3 +334,75 @@ def test_rewritten_sql_carries_no_comments(guard: ASTGuard, dialect: str, sql: s
 def test_comment_nesting_that_the_dialect_does_not_support_is_rejected(guard: ASTGuard) -> None:
     with pytest.raises(ASTSecurityViolation):
         guard.rewrite("SELECT * FROM orders /* a /* b */ ; DROP TABLE x */", dialect="mysql")
+
+
+# --- fourth round: equalities that mention both tables but cancel out ------------------------
+
+J = "SELECT * FROM orders a JOIN orders b ON "
+
+TAUTOLOGIES = [
+    ("postgres", J + "a.id - a.id = b.id - b.id"),
+    ("postgres", J + "a.id * 0 = b.id * 0"),
+    ("postgres", J + "a.id = CASE WHEN 1 = 1 THEN a.id ELSE b.id END"),
+    ("postgres", J + "a.id + b.id = a.id + b.id"),
+    ("postgres", J + "COALESCE(a.id, b.id) = COALESCE(a.id, b.id)"),
+    ("postgres", J + "a.id = a.id + b.id - b.id"),
+    ("postgres", J + "a.id = ANY (SELECT b.id)"),
+    ("postgres", J + "a.id = (SELECT MAX(id) FROM orders)"),
+    ("postgres", J + "a.id = b.id OR TRUE"),
+    ("postgres", J + "a.id = b.id OR 1 < 2"),
+    ("postgres", J + "a.id % 1 = b.id % 1"),
+    ("tsql", J + "a.id = b.id OR 'x' = 'x'"),
+    ("tsql", "SELECT * FROM orders a JOIN orders b ON id - id = idx - idx"),
+    ("postgres", "SELECT * FROM orders a, orders b WHERE a.id - a.id = b.id - b.id"),
+    ("postgres", "SELECT * FROM orders a, orders b WHERE a.id = b.id OR TRUE"),
+]
+
+GENUINE_JOINS = [
+    ("postgres", J + "UPPER(a.k) = UPPER(b.k)"),
+    ("postgres", J + "b.ym = a.year * 100 + a.month"),
+    ("postgres", J + "a.k = b.k AND a.s <> b.s"),
+    ("postgres", J + "a.d BETWEEN b.s AND b.e AND a.k = b.k"),
+    ("postgres", J + "a.k = b.k AND TRUE"),
+    ("postgres", J + "CAST(a.k AS TEXT) = b.k_text"),
+    ("postgres", J + "b.k = COALESCE(a.k, 0)"),
+    ("tsql", J + "a.k = b.k AND a.k > 0"),
+    ("tsql", "SELECT * FROM a JOIN b ON a.k = b.k JOIN c ON c.k = a.k AND c.j = b.j"),
+]
+
+
+@pytest.mark.parametrize(("dialect", "sql"), TAUTOLOGIES)
+def test_self_cancelling_condition_is_still_a_cartesian_join(
+    guard: ASTGuard, dialect: str, sql: str
+) -> None:
+    with pytest.raises(ASTSecurityViolation, match="Cartesian"):
+        guard.validate(sql, dialect=dialect)
+
+
+@pytest.mark.parametrize(("dialect", "sql"), GENUINE_JOINS)
+def test_genuine_join_conditions_are_not_collateral_damage(
+    guard: ASTGuard, dialect: str, sql: str
+) -> None:
+    guard.validate(sql, dialect=dialect)
+
+
+@pytest.mark.anyio
+async def test_every_join_tree_the_server_builds_passes_its_own_guard(guard: ASTGuard) -> None:
+    import itertools
+
+    from schema_compass.server import create_server
+    from tests.fixtures.sample_schema import SAMPLE_CONTRACTS
+
+    server = create_server(contracts=SAMPLE_CONTRACTS)
+    names = [c.name for c in SAMPLE_CONTRACTS]
+    checked = 0
+    for size in (2, 3):
+        for combo in itertools.combinations(names, size):
+            reply = await server.call_tool("get_join_tree", {"tables": list(combo)})
+            text = reply.content[0].text
+            if "FROM" not in text:
+                continue  # tables with no join path have no tree to check
+            sql = "SELECT * " + text.replace("```sql", "").replace("```", "").strip()
+            guard.validate(sql, dialect="tsql")
+            checked += 1
+    assert checked > 10

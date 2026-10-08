@@ -4,6 +4,7 @@ from collections.abc import Iterable
 import sqlglot
 from sqlglot import exp
 from sqlglot.errors import ParseError
+from sqlglot.optimizer.simplify import simplify
 
 from schema_compass.models import SchemaCompassError
 
@@ -461,7 +462,7 @@ class ASTGuard:
                         continue
                     on = join.args.get("on")
                     if on is not None:
-                        if not self._links(on, target, earlier):
+                        if not self._links(simplify(on.copy()), target, earlier):
                             raise ASTSecurityViolation(
                                 f"Unconstrained Cartesian join detected: {join.sql()}. "
                                 "The ON condition does not relate the joined table to an earlier one."
@@ -478,7 +479,11 @@ class ASTGuard:
                             f"Unconstrained Cartesian join detected: {join.sql()}. CROSS JOIN without condition blocked."
                         )
                     where = select.args.get("where")
-                    if not target or where is None or not self._links(where.this, target, earlier):
+                    if (
+                        not target
+                        or where is None
+                        or not self._links(simplify(where.this.copy()), target, earlier)
+                    ):
                         raise ASTSecurityViolation(
                             f"Unconstrained Cartesian join detected: {join.sql()}. Comma join requires cross-table equijoin predicate in WHERE."
                         )
@@ -505,14 +510,41 @@ class ASTGuard:
             )
         if not isinstance(cond, (exp.EQ, exp.NullSafeEQ)):
             return False
-        left = {(c.table.lower(), c.name.lower()) for c in cond.this.find_all(exp.Column)}
-        right = {(c.table.lower(), c.name.lower()) for c in cond.expression.find_all(exp.Column)}
-        if not left or not right or (left == right and len(left) == 1):
+        left = cls._side(cond.this)
+        right = cls._side(cond.expression)
+        if left is None or right is None:
             return False
-        qualifiers = {q for q, _ in left | right}
-        if "" in qualifiers:
+        (left_tables, left_columns), (right_tables, right_columns) = left, right
+        if left_columns & right_columns:
+            return False  # the same column on both sides: x = x
+        if "" in left_tables | right_tables:
             return True  # unqualified columns cannot be attributed to a table: give the benefit
-        return target in qualifiers and bool((qualifiers - {target}) & earlier)
+        # one side must come only from the joined table, the other only from earlier tables
+        return (left_tables == {target} and right_tables <= earlier) or (
+            right_tables == {target} and left_tables <= earlier
+        )
+
+    @staticmethod
+    def _side(expr: exp.Expression) -> tuple[set[str], set[tuple[str, str]]] | None:
+        """Tables and columns used by one side of an equality, or None if it cannot constrain.
+
+        Rejects sides with no column, subqueries, a column used twice (`a.id - a.id` cancels), and
+        multiplication by zero or modulo 1 (always 0).
+        """
+        if expr.find(exp.Subquery, exp.Select, exp.Any, exp.All, exp.Exists):
+            return None
+        columns = [(c.table.lower(), c.name.lower()) for c in expr.find_all(exp.Column)]
+        if not columns or len(columns) != len(set(columns)):
+            return None
+        for mul in expr.find_all(exp.Mul):
+            if any(
+                isinstance(o, exp.Literal) and o.name == "0" for o in (mul.this, mul.expression)
+            ):
+                return None
+        for mod in expr.find_all(exp.Mod):
+            if isinstance(mod.expression, exp.Literal) and mod.expression.name == "1":
+                return None
+        return {t for t, _ in columns}, set(columns)
 
     @staticmethod
     def _is_correlated(select: exp.Select, join: exp.Join, earlier: set[str]) -> bool:

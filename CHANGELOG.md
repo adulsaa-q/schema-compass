@@ -32,6 +32,9 @@ All notable changes to this project are documented here. Format follows
   "constrained". Range-only joins now need an equality on the key.
 - Blocked: file paths as table names (DuckDB), `FOR UPDATE`/`FOR SHARE`/`LOCK IN SHARE MODE`, Oracle
   `dba_*`/`v$*` and the Snowflake `snowflake` database. Comments are stripped from the returned SQL.
+- Join equalities must be one-sided: the joined table on one side, earlier tables on the other. Constants
+  are folded first, and subqueries, a column repeated on one side (`a.id - a.id`), `* 0` and `% 1` no longer
+  count as a link. Every join tree `get_join_tree` builds is now tested against the guard.
 - SECURITY.md now states what the guard does not protect against.
 
 ### Fixed (guard false positives)

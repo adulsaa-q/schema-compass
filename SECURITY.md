@@ -41,6 +41,10 @@ Known limits (not protected):
   and run the SQL that `execute_safe_query` returns, not the original text.
 - System catalog coverage is best effort: SQL Server, PostgreSQL, SQLite and MySQL are covered, Oracle
   `dba_*`/`v$*` and Snowflake's `snowflake` database are blocked, other engines are not tested.
+- The Cartesian check is there to stop accidental row explosions, not a determined author. Constants are
+  folded, an equality must tie the new table (one side) to earlier tables (other side), and subqueries,
+  repeated columns (`a.id - a.id`) and `* 0` do not count. Someone can still write a condition that is
+  always true in a way the guard cannot see; that is undecidable in general.
 - A join with only a range condition (`ON a.d BETWEEN b.s AND b.e`) is rejected; add an equality on
   the key or pass `allow_cartesian=True` through the Python API.
 - The column-level PII filter is name-based (`salary`, `password`, ...) and will not catch a

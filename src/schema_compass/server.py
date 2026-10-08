@@ -11,6 +11,7 @@ from schema_compass.profiler.contract import format_contract
 from schema_compass.profiler.erd import generate_mermaid_erd
 from schema_compass.safety.ast_guard import ASTGuard, ASTSecurityViolation
 from schema_compass.safety.audit import AuditLogger
+from schema_compass.search import search_contracts
 
 logger = logging.getLogger(__name__)
 
@@ -39,38 +40,18 @@ def create_server(contracts: list[TableContract] | None = None) -> MCPServer:
         description="Search database catalog for tables, views, and columns matching keywords",
     )
     def search_catalog(query: str, top_k: int = 5) -> str:
-        # rank tables by keyword matches in table name, description, and column attributes
-        q = query.strip().lower()
-        if not q:
+        if not query.strip():
             return "No query provided."
 
-        matches: list[tuple[float, TableContract, list[str]]] = []
-        for contract in loaded_contracts:
-            score = 0.0
-            matched_cols: list[str] = []
-            if q in contract.name.lower():
-                score += 10.0
-            if contract.description and q in contract.description.lower():
-                score += 3.0
-            for col in contract.columns:
-                if q in col.name.lower():
-                    score += 5.0
-                    matched_cols.append(col.name)
-                elif col.description and q in col.description.lower():
-                    score += 2.0
-                    matched_cols.append(col.name)
-
-            if score > 0:
-                matches.append((score, contract, matched_cols))
-
-        matches.sort(key=lambda x: x[0], reverse=True)
-        top_matches = matches[:top_k]
+        top_matches = search_contracts(loaded_contracts, query, top_k)
 
         if not top_matches:
             return f"No catalog matches found for '{query}'."
 
         lines = [f"Found {len(top_matches)} catalog matches for '{query}':"]
-        for _, c, cols in top_matches:
+        for hit in top_matches:
+            c = hit.contract
+            cols = hit.matched_columns
             col_hint = f" (matched columns: {', '.join(cols)})" if cols else ""
             lines.append(f"- **{c.full_name}** [{c.role} | {c.row_count:,} rows]{col_hint}")
         return "\n".join(lines)

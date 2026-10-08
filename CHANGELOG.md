@@ -3,6 +3,15 @@
 All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [SemVer](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+- `search_catalog` returned nothing for any multi-word query ("invoice total", "customer email")
+  because the whole phrase was matched as one substring. Queries are now split into words
+  (camelCase, snake_case and `table.column` aware, common filler words and plurals handled) and
+  ranked by how many words match; an exact table-name match ranks first. Found by running the
+  server against the public Chinook database.
+
 ## [0.1.1] - 2026-10-08
 
 ### Fixed

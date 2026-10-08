@@ -212,3 +212,125 @@ def test_three_part_names_to_user_data_still_work(guard: ASTGuard) -> None:
 def test_mysql_executable_comment_is_neutralised_in_the_rewritten_sql(guard: ASTGuard) -> None:
     out = guard.rewrite("SELECT 1 /*!50000 UNION SELECT user FROM mysql.user */", dialect="mysql")
     assert "/*!" not in out
+
+
+# --- third round: join conditions that constrain nothing, file-reading table names, locks ----
+
+FAKE_JOIN_CONDITIONS = [
+    ("postgres", "SELECT * FROM orders a, orders b WHERE a.id = b.id OR 1 = 1"),
+    ("postgres", "SELECT * FROM orders a, orders b WHERE NOT (a.id = b.id)"),
+    ("postgres", "SELECT * FROM orders a, orders b WHERE a.id = b.id OR a.x = 1"),
+    (
+        "postgres",
+        "SELECT * FROM orders a, orders b WHERE EXISTS (SELECT 1 FROM c WHERE a.id = b.id)",
+    ),
+    ("postgres", "SELECT * FROM orders a, orders b WHERE a.id <> b.id"),
+    ("postgres", "SELECT * FROM orders a JOIN orders b ON 1 = 1"),
+    ("postgres", "SELECT * FROM orders a JOIN orders b ON TRUE"),
+    ("tsql", "SELECT * FROM orders a JOIN orders b ON a.id = a.id"),
+    ("tsql", "SELECT * FROM orders a JOIN orders b ON 1 = 1 OR a.id = b.id"),
+    ("tsql", "SELECT * FROM orders a LEFT JOIN orders b ON a.id = b.id OR 1 = 1"),
+    ("postgres", "SELECT * FROM orders a FULL OUTER JOIN orders b ON a.id > 0"),
+    ("postgres", "SELECT * FROM orders a JOIN orders b ON a.id IS NOT NULL"),
+    ("postgres", "SELECT * FROM orders a JOIN orders b ON a.x = 1"),
+    ("postgres", "SELECT * FROM orders a JOIN orders b ON b.x = 1 AND a.y = 2"),
+]
+
+REAL_JOIN_CONDITIONS = [
+    ("postgres", "SELECT * FROM orders a JOIN orders b ON a.id = b.id"),
+    ("postgres", "SELECT * FROM orders a JOIN orders b USING (id)"),
+    ("postgres", "SELECT * FROM orders a, orders b WHERE a.id = b.id"),
+    ("postgres", "SELECT * FROM orders a, orders b WHERE a.id = b.id AND a.x > 1"),
+    ("postgres", "SELECT * FROM orders a JOIN orders b ON a.id = b.id AND b.x = 1"),
+    ("postgres", "SELECT * FROM orders a JOIN orders b ON (a.id = b.id OR a.alt = b.id)"),
+    ("postgres", "SELECT * FROM orders a LEFT JOIN orders b ON b.id = a.id WHERE b.id IS NULL"),
+    ("tsql", "SELECT * FROM orders o JOIN customers c ON o.customer_id = c.customer_id"),
+    ("tsql", "SELECT * FROM a JOIN b ON a.k = b.k JOIN c ON c.k = b.k"),
+    ("tsql", "SELECT * FROM a, b, c WHERE a.k = b.k AND b.k = c.k"),
+    ("sqlite", "SELECT * FROM a JOIN b ON customer_id = id"),  # unqualified columns get the benefit
+    ("postgres", "SELECT * FROM a JOIN b ON a.k IS NOT DISTINCT FROM b.k"),
+]
+
+
+@pytest.mark.parametrize(("dialect", "sql"), FAKE_JOIN_CONDITIONS)
+def test_join_condition_that_constrains_nothing_is_a_cartesian_join(
+    guard: ASTGuard, dialect: str, sql: str
+) -> None:
+    with pytest.raises(ASTSecurityViolation, match="Cartesian"):
+        guard.validate(sql, dialect=dialect)
+
+
+@pytest.mark.parametrize(("dialect", "sql"), REAL_JOIN_CONDITIONS)
+def test_real_join_condition_is_allowed(guard: ASTGuard, dialect: str, sql: str) -> None:
+    guard.validate(sql, dialect=dialect)
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "SELECT * FROM '/etc/passwd'",
+        "SELECT * FROM 'C:/secret/data.csv'",
+        r"SELECT * FROM 'C:\secret\data.csv'",
+        'SELECT * FROM "data.parquet"',
+        "SELECT * FROM 'events.json'",
+        "SELECT * FROM 'https://example.com/x.csv'",
+        r"SELECT * FROM 'C:\secret\data'",  # backslash only, no extension
+    ],
+)
+def test_file_paths_used_as_table_names_are_blocked(guard: ASTGuard, sql: str) -> None:
+    with pytest.raises(ASTSecurityViolation):
+        guard.validate(sql, dialect="duckdb")
+
+
+@pytest.mark.parametrize(
+    ("dialect", "sql"),
+    [
+        ("postgres", "SELECT * FROM orders FOR UPDATE"),
+        ("postgres", "SELECT * FROM orders FOR SHARE NOWAIT"),
+        ("mysql", "SELECT * FROM orders FOR UPDATE"),
+        ("mysql", "SELECT * FROM orders LOCK IN SHARE MODE"),
+    ],
+)
+def test_row_locking_clauses_are_blocked(guard: ASTGuard, dialect: str, sql: str) -> None:
+    with pytest.raises(ASTSecurityViolation):
+        guard.validate(sql, dialect=dialect)
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "SELECT * FROM dba_users",
+        "SELECT * FROM v$session",
+        "SELECT * FROM sys.user$",
+        "SELECT * FROM snowflake.account_usage.login_history",
+    ],
+)
+def test_other_vendor_system_views_are_blocked(guard: ASTGuard, sql: str) -> None:
+    dialect = "snowflake" if sql.startswith("SELECT * FROM snowflake") else "oracle"
+    with pytest.raises(ASTSecurityViolation):
+        guard.validate(sql, dialect=dialect)
+
+
+def test_user_tables_that_resemble_system_names_still_work(guard: ASTGuard) -> None:
+    for sql in ("SELECT * FROM all_orders", "SELECT * FROM user_events", "SELECT * FROM data_csv"):
+        guard.validate(sql, dialect="postgres")
+
+
+@pytest.mark.parametrize(
+    ("dialect", "sql"),
+    [
+        ("tsql", "SELECT * FROM orders /* a /* b */ ; DROP TABLE x */ WHERE id = 1 -- tail"),
+        ("postgres", "SELECT * FROM orders /* a /* b */ ; DROP TABLE x */ WHERE id = 1 -- tail"),
+        ("mysql", "SELECT * FROM orders /* a */ WHERE id = 1 -- tail"),
+        ("mysql", "SELECT * FROM orders /*!50000 WHERE id = 1 */"),
+        ("sqlite", "SELECT * FROM orders /* a */ WHERE id = 1 -- tail"),
+    ],
+)
+def test_rewritten_sql_carries_no_comments(guard: ASTGuard, dialect: str, sql: str) -> None:
+    out = guard.rewrite(sql, dialect=dialect)
+    assert "/*" not in out and "--" not in out and "DROP" not in out
+
+
+def test_comment_nesting_that_the_dialect_does_not_support_is_rejected(guard: ASTGuard) -> None:
+    with pytest.raises(ASTSecurityViolation):
+        guard.rewrite("SELECT * FROM orders /* a /* b */ ; DROP TABLE x */", dialect="mysql")

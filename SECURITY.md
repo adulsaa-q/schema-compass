@@ -20,9 +20,12 @@ Blocked by default:
   hard-deny list for file/OS access, sleeps and state changes (`nextval`, advisory locks, `lo_*`);
 - reads of system catalogs (`sys.*`, `pg_catalog`, `pg_shadow`, `sqlite_master`, `mysql.*`, `master..`);
 - table hints that take locks (`TABLOCKX`, `UPDLOCK`, `HOLDLOCK`, ...) and `OPTION (MAXRECURSION 0)`;
-- recursive CTEs, unconstrained Cartesian joins (a subquery, `LATERAL` or `APPLY` that merely mentions an
-  outer column does not count as a join condition), and queries over the join or nesting limits;
-- four-part names (`server.db.schema.table`), which reach linked servers.
+- recursive CTEs, unconstrained Cartesian joins (a join condition must be an equality that ties the new table to an earlier one, combined
+  with `AND`; `ON 1=1`, `OR 1=1`, `NOT`, single-table filters and subqueries do not count, and a
+  subquery, `LATERAL` or `APPLY` that merely mentions an outer column is not a condition), and queries over the join or nesting limits;
+- four-part names (`server.db.schema.table`), which reach linked servers;
+- file paths used as table names (DuckDB reads `FROM '/data/x.csv'`), row-locking clauses
+  (`FOR UPDATE`, `FOR SHARE`, `LOCK IN SHARE MODE`), and comments in the returned SQL.
 
 Opt in with `--allow-function NAME`, `--allow-recursive-cte`, `--allow-system-catalogs`
 (or the matching `ASTGuard(...)` arguments). Hard-denied functions cannot be unlocked.
@@ -36,6 +39,10 @@ Known limits (not protected):
 - Server version and session variables such as `@@version` are readable.
 - The guard parses with the dialect you pass. Pass the dialect of the server that will run the query,
   and run the SQL that `execute_safe_query` returns, not the original text.
+- System catalog coverage is best effort: SQL Server, PostgreSQL, SQLite and MySQL are covered, Oracle
+  `dba_*`/`v$*` and Snowflake's `snowflake` database are blocked, other engines are not tested.
+- A join with only a range condition (`ON a.d BETWEEN b.s AND b.e`) is rejected; add an equality on
+  the key or pass `allow_cartesian=True` through the Python API.
 - The column-level PII filter is name-based (`salary`, `password`, ...) and will not catch a
   sensitive column with an innocent name.
 

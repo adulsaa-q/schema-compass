@@ -27,6 +27,11 @@ All notable changes to this project are documented here. Format follows
   catalog list. `OPTION (MAXRECURSION n)` must be a literal between 1 and 32767.
 - A correlated join is only excused for table functions (`FROM t, json_each(t.j)`), not for subqueries,
   `LATERAL` or `CROSS APPLY`, which could be made to pass as a Cartesian product with a dummy reference.
+- Join conditions are checked for substance, not just presence: `ON 1=1`, `ON TRUE`, `a.id = a.id`,
+  `a.id = b.id OR 1=1`, `NOT (a.id = b.id)` and equalities hidden in subqueries no longer pass as
+  "constrained". Range-only joins now need an equality on the key.
+- Blocked: file paths as table names (DuckDB), `FOR UPDATE`/`FOR SHARE`/`LOCK IN SHARE MODE`, Oracle
+  `dba_*`/`v$*` and the Snowflake `snowflake` database. Comments are stripped from the returned SQL.
 - SECURITY.md now states what the guard does not protect against.
 
 ### Fixed (guard false positives)

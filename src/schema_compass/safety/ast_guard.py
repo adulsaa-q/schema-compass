@@ -30,6 +30,7 @@ PROHIBITED_NODES = (
     exp.Revoke,
     exp.Pragma,
     exp.Copy,
+    exp.Lock,  # FOR UPDATE / FOR SHARE / LOCK IN SHARE MODE
 )
 
 PROHIBITED_FUNCTIONS = {
@@ -211,7 +212,7 @@ ALLOWED_TABLE_HINTS = frozenset(
 )
 
 SYSTEM_SCHEMAS = frozenset({"sys", "pg_catalog", "pg_toast", "mysql", "performance_schema"})
-SYSTEM_DATABASES = frozenset({"master", "msdb", "tempdb", "model"})
+SYSTEM_DATABASES = frozenset({"master", "msdb", "tempdb", "model", "snowflake"})
 
 
 import re
@@ -228,8 +229,14 @@ SENSITIVE_TABLE_PATTERNS = re.compile(
 
 
 SYSTEM_TABLE_PATTERN = re.compile(
-    r"^(pg_|sqlite_)|^sys(databases|logins|objects|columns|users|processes|servers|configures"
+    r"^(pg_|sqlite_|dba_|g?v\$)|^sys(databases|logins|objects|columns|users|processes|servers|configures"
     r"|comments|xlogins|indexes|types)$",
+    re.IGNORECASE,
+)
+
+# DuckDB (and others) read a file when its path is used as a table name: FROM '/data/x.csv'
+FILE_LIKE_NAME = re.compile(
+    r"[\\/]|^[a-z][a-z0-9+.-]*://|\.(csv|tsv|parquet|json|jsonl|ndjson|txt|gz|zst|xlsx?|db|sqlite3?)$",
     re.IGNORECASE,
 )
 
@@ -382,60 +389,7 @@ class ASTGuard:
                             )
 
         if not allow_cartesian:
-            for select_expr in stmt.find_all(exp.Select):
-                where_node = select_expr.args.get("where")
-                where_cross_pairs: set[frozenset[str]] = set()
-                if where_node is not None:
-                    for eq in where_node.find_all(exp.EQ):
-                        left = eq.this
-                        right = eq.expression
-                        if (
-                            isinstance(left, exp.Column)
-                            and isinstance(right, exp.Column)
-                            and left.table
-                            and right.table
-                        ):
-                            t1 = left.table.lower()
-                            t2 = right.table.lower()
-                            if t1 != t2:
-                                where_cross_pairs.add(frozenset([t1, t2]))
-
-                # Inspect only direct joins of this Select node to avoid subquery scope leaks
-                joins = select_expr.args.get("joins") or []
-                for join in joins:
-                    has_on_or_using = bool(join.args.get("on") or join.args.get("using"))
-                    is_cross = (
-                        bool(join.kind and "CROSS" in join.kind.upper())
-                        or join.args.get("kind") == "CROSS"
-                    )
-
-                    # Explicit CROSS JOIN without condition is always a Cartesian violation
-                    if (
-                        is_cross
-                        and not has_on_or_using
-                        and not self._is_correlated(select_expr, join)
-                    ):
-                        raise ASTSecurityViolation(
-                            f"Unconstrained Cartesian join detected: {join.sql()}. CROSS JOIN without condition blocked."
-                        )
-
-                    # A join whose right side reads an earlier table (json_each(t.j), LATERAL,
-                    # CROSS APPLY) is correlated per row, not a Cartesian product.
-                    if not has_on_or_using and self._is_correlated(select_expr, join):
-                        continue
-
-                    # Implicit comma join or unconstrained join must have equijoin connecting to another table
-                    if not has_on_or_using:
-                        table_name = (
-                            join.this.alias_or_name.lower()
-                            if hasattr(join.this, "alias_or_name")
-                            else ""
-                        )
-                        is_linked = any(table_name in pair for pair in where_cross_pairs)
-                        if not table_name or not is_linked:
-                            raise ASTSecurityViolation(
-                                f"Unconstrained Cartesian join detected: {join.sql()}. Comma join requires cross-table equijoin predicate in WHERE."
-                            )
+            self._check_joins(stmt)
 
         return stmt
 
@@ -472,6 +426,10 @@ class ASTGuard:
                             "Only NOLOCK/READUNCOMMITTED and plain index hints are allowed."
                         )
 
+            if FILE_LIKE_NAME.search(name):
+                raise ASTSecurityViolation(
+                    f"Table name '{name[:60]}' looks like a file path, which some engines read directly."
+                )
             parts = [part.name.lower() for part in table.parts]
             if len(parts) > MAX_NAME_PARTS:
                 raise ASTSecurityViolation(
@@ -488,8 +446,76 @@ class ASTGuard:
                     "(it can expose credentials and server configuration)."
                 )
 
+    def _check_joins(self, stmt: exp.Query) -> None:
+        """Every joined table must be tied to an earlier one by a real condition."""
+        for select in stmt.find_all(exp.Select):
+            joins = select.args.get("joins") or []
+            from_node = select.args.get("from") or select.args.get("from_")
+            earlier = (
+                {from_node.this.alias_or_name.lower()} if from_node and from_node.this else set()
+            )
+            for join in joins:
+                target = (join.this.alias_or_name or "").lower() if join.this is not None else ""
+                try:
+                    if join.args.get("using"):
+                        continue
+                    on = join.args.get("on")
+                    if on is not None:
+                        if not self._links(on, target, earlier):
+                            raise ASTSecurityViolation(
+                                f"Unconstrained Cartesian join detected: {join.sql()}. "
+                                "The ON condition does not relate the joined table to an earlier one."
+                            )
+                        continue
+                    if self._is_correlated(select, join, earlier):
+                        continue
+                    if (
+                        join.kind
+                        and "CROSS" in join.kind.upper()
+                        or join.args.get("kind") == "CROSS"
+                    ):
+                        raise ASTSecurityViolation(
+                            f"Unconstrained Cartesian join detected: {join.sql()}. CROSS JOIN without condition blocked."
+                        )
+                    where = select.args.get("where")
+                    if not target or where is None or not self._links(where.this, target, earlier):
+                        raise ASTSecurityViolation(
+                            f"Unconstrained Cartesian join detected: {join.sql()}. Comma join requires cross-table equijoin predicate in WHERE."
+                        )
+                finally:
+                    if target:
+                        earlier.add(target)
+
+    @classmethod
+    def _links(cls, cond: exp.Expression, target: str, earlier: set[str]) -> bool:
+        """True when `cond` forces the joined table to match an earlier one.
+
+        Only conditions that must hold count: an AND needs one linking side, an OR needs both,
+        and NOT, constants, `a.x = a.x`, single-table filters and subqueries never link.
+        """
+        if isinstance(cond, exp.Paren):
+            return cls._links(cond.this, target, earlier)
+        if isinstance(cond, exp.And):
+            return cls._links(cond.this, target, earlier) or cls._links(
+                cond.expression, target, earlier
+            )
+        if isinstance(cond, exp.Or):
+            return cls._links(cond.this, target, earlier) and cls._links(
+                cond.expression, target, earlier
+            )
+        if not isinstance(cond, (exp.EQ, exp.NullSafeEQ)):
+            return False
+        left = {(c.table.lower(), c.name.lower()) for c in cond.this.find_all(exp.Column)}
+        right = {(c.table.lower(), c.name.lower()) for c in cond.expression.find_all(exp.Column)}
+        if not left or not right or (left == right and len(left) == 1):
+            return False
+        qualifiers = {q for q, _ in left | right}
+        if "" in qualifiers:
+            return True  # unqualified columns cannot be attributed to a table: give the benefit
+        return target in qualifiers and bool((qualifiers - {target}) & earlier)
+
     @staticmethod
-    def _is_correlated(select: exp.Select, join: exp.Join) -> bool:
+    def _is_correlated(select: exp.Select, join: exp.Join, earlier: set[str]) -> bool:
         """True for a table function fed by an earlier table, e.g. `FROM t, json_each(t.j)`.
 
         Its row count is bounded by the value in each row. Subqueries, LATERAL and APPLY are
@@ -501,14 +527,7 @@ class ASTGuard:
         )
         if not is_table_function:
             return False
-        from_node = select.args.get("from") or select.args.get("from_")
-        earlier = [from_node.this] if from_node is not None and from_node.this else []
-        for other in select.args.get("joins") or []:
-            if other is join:
-                break
-            earlier.append(other.this)
-        names = {e.alias_or_name.lower() for e in earlier if e is not None and e.alias_or_name}
-        return any(col.table.lower() in names for col in target.find_all(exp.Column) if col.table)
+        return any(col.table.lower() in earlier for col in target.find_all(exp.Column) if col.table)
 
     def _check_query_options(self, stmt: exp.Query) -> None:
         for option in stmt.find_all(exp.QueryOption):
@@ -597,4 +616,4 @@ class ASTGuard:
                 if not table.args.get("hints"):
                     table.set("hints", [exp.WithTableHint(expressions=[exp.var("NOLOCK")])])
 
-        return ast.sql(dialect=dialect)
+        return ast.sql(dialect=dialect, comments=False)
